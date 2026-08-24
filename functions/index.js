@@ -181,26 +181,44 @@ exports.lineWebhook = onRequest(async (req, res) => {
                         try {
                             console.log(`>>> [ACTION] Processing RESET for ${userId}`);
                             
-                            // 1. Reset total amount
+                            // 1. Fetch current total amount before resetting
+                            const totalDoc = await admin.firestore().collection("donation").doc("total").get();
+                            const currentAmount = totalDoc.exists ? (totalDoc.data().amount || 0) : 0;
+
+                            // 2. Reset total amount
                             await admin.firestore().collection("donation").doc("total").set({
                                 amount: 0,
                                 lastResetAt: admin.firestore.FieldValue.serverTimestamp()
                             }, { merge: true });
 
-                            // 2. Log to SystemLogs (ประวัติการบริจาครายคนยังคงถูกเก็บไว้เพื่อเป็นประวัติ)
+                            // 3. Save to ResetHistory collection
+                            await admin.firestore().collection("ResetHistory").add({
+                                amount: currentAmount,
+                                resetBy: userData.name || "ผู้ดูแลระบบ",
+                                userId: userId,
+                                note: "รีเซ็ตยอดเงินผ่าน LINE Bot",
+                                timestamp: admin.firestore.FieldValue.serverTimestamp()
+                            });
+
+                            // 4. Log to SystemLogs (ประวัติการบริจาครายคนยังคงถูกเก็บไว้เพื่อเป็นประวัติ)
                             await admin.firestore().collection("SystemLogs").add({
                                 action: "รีเซ็ตยอดเงินในตู้ผ่าน LINE",
                                 user: userData.name || "ผู้ดูแลระบบ",
-                                note: `รีเซ็ตยอดเงินในตู้บริจาค (เก็บรักษาประวัติการบริจาคเดิม)`,
+                                note: `สรุปยอดเงินจากการรีเซ็ต: ฿${currentAmount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท`,
                                 type: "user",
                                 timestamp: admin.firestore.FieldValue.serverTimestamp()
                             });
                             
                             await admin.firestore().collection("Users").doc(userId).set({ pendingAction: null }, { merge: true });
                             
+                            const nowStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' });
+
                             return client.replyMessage({
                                 replyToken: event.replyToken,
-                                messages: [{ type: "text", text: "✅ ระบบได้ทำการรีเซ็ตยอดเงินในตู้เรียบร้อยแล้วครับ\n📊 ยอดเงินปัจจุบัน: ฿0\n(ประวัติการบริจาคเดิมยังคงถูกเก็บรักษาไว้)" }]
+                                messages: [{ 
+                                    type: "text", 
+                                    text: `✅ ระบบได้ทำการรีเซ็ตยอดเงินในตู้เรียบร้อยแล้วครับ\n\n💰 ยอดเงินที่สรุปรอบนี้: ฿${currentAmount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท\n📅 วันเวลาที่รีเซ็ต: ${nowStr}\n📊 ยอดเงินในตู้ปัจจุบัน: ฿0.00\n(ประวัติการบริจาคเดิมยังคงถูกเก็บรักษาไว้)` 
+                                }]
                             });
                         } catch (err) {
                             console.error(">>> [ERROR] Reset failed:", err);

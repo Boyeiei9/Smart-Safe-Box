@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { doc, onSnapshot, collection, query, orderBy, limit, getDocs, setDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo } from 'react';
+import { doc, onSnapshot, collection, query, orderBy, limit, setDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import { Wallet, CalendarRange, BarChart3, TrendingUp, RefreshCw } from 'lucide-react';
+import { Wallet, CalendarRange, BarChart3, TrendingUp, RefreshCw, RotateCcw, Calendar, History, Coins, CheckCircle2, AlertTriangle, FileText, PlusCircle, Sparkles, CalendarDays, Filter } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import TaxDocumentModal from './TaxDocumentModal';
 
 export default function Dashboard() {
   const [totalAmount, setTotalAmount] = useState(0);
@@ -12,11 +13,85 @@ export default function Dashboard() {
   const [monthlyAmount, setMonthlyAmount] = useState(0);
   const [chartPeriod, setChartPeriod] = useState('daily');
   const [chartData, setChartData] = useState([]);
+  const [resetHistory, setResetHistory] = useState([]);
+  const [resetPeriod, setResetPeriod] = useState('per_reset'); // 'per_reset' | 'monthly' | 'yearly'
+  const [resetLoading, setResetLoading] = useState(true);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+
+  // Simulation State
+  const [showSimulateModal, setShowSimulateModal] = useState(false);
+  const [customAmount, setCustomAmount] = useState('');
+  const [isSimulating, setIsSimulating] = useState(false);
+
+  // Tax Modal State
+  const [taxDocData, setTaxDocData] = useState(null);
+  const [isTaxModalOpen, setIsTaxModalOpen] = useState(false);
 
   // Format currency
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
   };
+
+  // Format date & time
+  const formatDateTime = (date) => {
+    if (!date) return '-';
+    return new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  };
+
+  // Group resets by month
+  const monthlyResets = useMemo(() => {
+    const groups = {};
+    resetHistory.forEach((item) => {
+      const d = item.timestamp ? new Date(item.timestamp) : new Date();
+      const monthYearKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const monthName = d.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
+
+      if (!groups[monthYearKey]) {
+        groups[monthYearKey] = {
+          periodKey: monthYearKey,
+          periodLabel: `ประจำเดือน ${monthName}`,
+          amount: 0,
+          count: 0,
+          items: [],
+          resetBy: item.resetBy,
+          timestamp: d
+        };
+      }
+      groups[monthYearKey].amount += item.amount;
+      groups[monthYearKey].count += 1;
+      groups[monthYearKey].items.push(item);
+    });
+
+    return Object.values(groups).sort((a, b) => b.periodKey.localeCompare(a.periodKey));
+  }, [resetHistory]);
+
+  // Group resets by year
+  const yearlyResets = useMemo(() => {
+    const groups = {};
+    resetHistory.forEach((item) => {
+      const d = item.timestamp ? new Date(item.timestamp) : new Date();
+      const yearKey = `${d.getFullYear()}`;
+      const yearBuddhist = d.getFullYear() + 543;
+
+      if (!groups[yearKey]) {
+        groups[yearKey] = {
+          periodKey: yearKey,
+          periodLabel: `ประจำปี พ.ศ. ${yearBuddhist}`,
+          amount: 0,
+          count: 0,
+          items: [],
+          resetBy: item.resetBy,
+          timestamp: d
+        };
+      }
+      groups[yearKey].amount += item.amount;
+      groups[yearKey].count += 1;
+      groups[yearKey].items.push(item);
+    });
+
+    return Object.values(groups).sort((a, b) => b.periodKey.localeCompare(a.periodKey));
+  }, [resetHistory]);
 
   // Subscribe to Total Amount
   useEffect(() => {
@@ -26,6 +101,31 @@ export default function Dashboard() {
         setTotalAmount(docSnap.data().amount || 0);
       }
     });
+    return () => unsubscribe();
+  }, []);
+
+  // Subscribe to Reset History
+  useEffect(() => {
+    const q = query(collection(db, 'ResetHistory'), orderBy('timestamp', 'desc'), limit(100));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const historyList = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        historyList.push({
+          id: docSnap.id,
+          amount: data.amount || 0,
+          resetBy: data.resetBy || 'ผู้ดูแลระบบ',
+          note: data.note || 'รีเซ็ตยอดเงินในตู้',
+          timestamp: data.timestamp ? data.timestamp.toDate() : new Date()
+        });
+      });
+      setResetHistory(historyList);
+      setResetLoading(false);
+    }, (error) => {
+      console.error('Error fetching reset history:', error);
+      setResetLoading(false);
+    });
+
     return () => unsubscribe();
   }, []);
 
@@ -137,8 +237,176 @@ export default function Dashboard() {
     setChartData(dataValues);
   };
 
+  // Perform Reset Balance
+  const handleConfirmReset = async () => {
+    setIsResetting(true);
+    try {
+      const currentResetAmount = totalAmount;
+
+      // 1. Reset total amount in Firestore
+      await setDoc(doc(db, 'donation', 'total'), {
+        amount: 0,
+        lastResetAt: serverTimestamp()
+      }, { merge: true });
+
+      // 2. Record to ResetHistory collection
+      await addDoc(collection(db, 'ResetHistory'), {
+        amount: currentResetAmount,
+        resetBy: 'ผู้ดูแลระบบ (Web Dashboard)',
+        note: 'รีเซ็ตยอดเงินผ่าน Web Dashboard',
+        timestamp: serverTimestamp()
+      });
+
+      // 3. Record to SystemLogs
+      await addDoc(collection(db, 'SystemLogs'), {
+        action: 'รีเซ็ตยอดเงินในตู้ผ่าน Web Dashboard',
+        user: 'ผู้ดูแลระบบ',
+        note: `สรุปยอดเงินจากการรีเซ็ต: ฿${formatCurrency(currentResetAmount)} บาท`,
+        type: 'admin',
+        timestamp: serverTimestamp()
+      });
+
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 }
+      });
+
+      setShowResetModal(false);
+    } catch (err) {
+      console.error('Error resetting balance:', err);
+      alert('เกิดข้อผิดพลาดในการรีเซ็ตยอดเงิน: ' + err.message);
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  // Open Tax document modal from Dashboard
+  const openTaxDocument = (type, data) => {
+    if (type === 'single') {
+      setTaxDocData({
+        type: 'single',
+        templeName: 'วัดโคก',
+        docNo: `TAX-${data.timestamp ? new Date(data.timestamp).getTime().toString().slice(-6) : Date.now().toString().slice(-6)}`,
+        timestamp: data.timestamp,
+        periodLabel: `รอบรีเซ็ตเมื่อ ${formatDateTime(data.timestamp)}`,
+        amount: data.amount,
+        resetBy: data.resetBy,
+        note: data.note,
+        items: [data]
+      });
+    } else if (type === 'monthly') {
+      setTaxDocData({
+        type: 'monthly',
+        templeName: 'วัดโคก',
+        docNo: `TAX-M-${data.periodKey.replace('-', '')}`,
+        timestamp: data.timestamp,
+        periodLabel: data.periodLabel,
+        amount: data.amount,
+        resetBy: data.resetBy || 'ผู้ดูแลระบบ',
+        note: `สรุปการรีเซ็ตประจำเดือน (รวม ${data.count} รอบ)`,
+        items: data.items
+      });
+    } else if (type === 'yearly') {
+      setTaxDocData({
+        type: 'yearly',
+        templeName: 'วัดโคก',
+        docNo: `TAX-Y-${data.periodKey}`,
+        timestamp: data.timestamp,
+        periodLabel: data.periodLabel,
+        amount: data.amount,
+        resetBy: data.resetBy || 'ผู้ดูแลระบบ',
+        note: `สรุปการรีเซ็ตประจำปี (รวม ${data.count} รอบ)`,
+        items: data.items
+      });
+    }
+    setIsTaxModalOpen(true);
+  };
+
+  // Perform Simulate Donation
+  const handleSimulateDonation = async (amountToDonate) => {
+    const val = parseFloat(amountToDonate);
+    if (isNaN(val) || val <= 0) {
+      alert('โปรดระบุจำนวนเงินบริจาคที่ถูกต้อง (มากกว่า 0 บาท)');
+      return;
+    }
+
+    setIsSimulating(true);
+    try {
+      // 1. Record to Donation collection
+      // Cloud Function (updateTotalDonation) will automatically add val to donation/total
+      await addDoc(collection(db, 'Donation'), {
+        amount: val,
+        timestamp: serverTimestamp()
+      });
+
+      // 2. Record to SystemLogs
+      await addDoc(collection(db, 'SystemLogs'), {
+        action: 'จำลองการหยอดเงินบริจาคเข้าตู้',
+        user: 'ผู้ทดสอบ (Web Dashboard)',
+        note: `จำลองการหยอดเงินบริจาคจำนวน ฿${formatCurrency(val)} บาท`,
+        type: 'user',
+        timestamp: serverTimestamp()
+      });
+
+      confetti({
+        particleCount: 80,
+        spread: 60,
+        origin: { y: 0.6 }
+      });
+
+      setShowSimulateModal(false);
+      setCustomAmount('');
+    } catch (err) {
+      console.error('Error simulating donation:', err);
+      alert('เกิดข้อผิดพลาดในการจำลองหยอดเงิน: ' + err.message);
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
   return (
     <section className="page-section">
+
+      {/* Top Banner / Simulation Action Bar */}
+      <div style={{
+        display: 'flex',
+        justify: 'space-between',
+        alignItems: 'center',
+        marginBottom: '1.25rem',
+        gap: '1rem',
+        flexWrap: 'wrap'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--gray-600)' }}>
+            ระบบตู้บริจาคเงินอัจฉริยะ วัดโคก
+          </span>
+        </div>
+        <button
+          type="button"
+          className="btn-simulate-trigger"
+          onClick={() => setShowSimulateModal(true)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '0.6rem 1.2rem',
+            borderRadius: '999px',
+            border: 'none',
+            background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+            color: 'white',
+            fontWeight: 700,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          <Sparkles size={16} />
+          <PlusCircle size={18} />
+          จำลองการหยอดเงินบริจาค
+        </button>
+      </div>
 
       {/* Stat Cards */}
       <div className="stat-cards">
@@ -186,10 +454,10 @@ export default function Dashboard() {
         </div>
         <div className="chart-container">
           <ResponsiveContainer width="100%" height={340}>
-            <BarChart data={chartData} margin={{ top: 10, right: 10, left: 30, bottom: 0 }}>
+            <BarChart data={chartData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-              <XAxis dataKey="name" stroke="#64748B" fontSize={12} tickLine={false} axisLine={false} />
-              <YAxis stroke="#64748B" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${value} ฿`} />
+              <XAxis dataKey="name" stroke="#64748B" fontSize={12} tickLine={false} axisLine={false} interval={0} />
+              <YAxis stroke="#64748B" fontSize={12} tickLine={false} axisLine={false} width={45} tickFormatter={(value) => `${value} ฿`} />
               <Tooltip 
                 cursor={{ fill: 'rgba(99, 102, 241, 0.04)' }}
                 contentStyle={{ background: '#0F172A', color: 'white', borderRadius: '8px', border: 'none' }}
@@ -200,6 +468,295 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Reset Confirmation Modal */}
+      {showResetModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999,
+          padding: '1rem'
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            maxWidth: '460px',
+            width: '100%',
+            padding: '2rem',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            animation: 'fadeIn 0.2s ease-out'
+          }}>
+            <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
+              <div style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                color: '#EF4444',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '1rem'
+              }}>
+                <AlertTriangle size={28} />
+              </div>
+              <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 700, color: 'var(--dark)' }}>
+                ยืนยันการรีเซ็ตยอดเงินในตู้
+              </h3>
+              <p style={{ marginTop: '8px', fontSize: '0.925rem', color: 'var(--gray-500)', lineHeight: '1.5' }}>
+                ท่านกำลังจะรีเซ็ตยอดเงินและถอนเงินออกจากตู้
+              </p>
+            </div>
+
+            <div style={{
+              background: '#F8FAFC',
+              border: '1px dashed #CBD5E1',
+              borderRadius: '10px',
+              padding: '1rem 1.25rem',
+              textAlign: 'center',
+              marginBottom: '1.5rem'
+            }}>
+              <span style={{ fontSize: '0.875rem', color: 'var(--gray-500)', display: 'block', marginBottom: '4px' }}>
+                ยอดเงินที่จะสรุปและถอนออกรอบนี้
+              </span>
+              <span style={{ fontSize: '1.75rem', fontWeight: 800, color: '#059669' }}>
+                ฿{formatCurrency(totalAmount)}
+              </span>
+              <span style={{ fontSize: '0.85rem', color: 'var(--gray-500)', display: 'block', marginTop: '4px' }}>
+                วันที่เวลาถอน: {formatDateTime(new Date())}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                disabled={isResetting}
+                style={{
+                  flex: 1,
+                  padding: '0.75rem 1rem',
+                  borderRadius: '8px',
+                  border: '1px solid #CBD5E1',
+                  background: 'white',
+                  color: 'var(--gray-700)',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReset}
+                disabled={isResetting}
+                style={{
+                  flex: 1.2,
+                  padding: '0.75rem 1rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: '#EF4444',
+                  color: 'white',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}
+              >
+                {isResetting ? (
+                  <>
+                    <i className="fa-solid fa-spinner fa-spin"></i>
+                    กำลังบันทึก...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={18} />
+                    ยืนยันรีเซ็ตเป็น ฿0
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Simulation Donation Modal */}
+      {showSimulateModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999,
+          padding: '1rem'
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            maxWidth: '460px',
+            width: '100%',
+            padding: '2rem',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            animation: 'fadeIn 0.2s ease-out'
+          }}>
+            <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
+              <div style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                color: '#10B981',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '1rem'
+              }}>
+                <Coins size={28} />
+              </div>
+              <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 700, color: 'var(--dark)' }}>
+                จำลองการหยอดเงินเข้าตู้บริจาค
+              </h3>
+              <p style={{ marginTop: '8px', fontSize: '0.925rem', color: 'var(--gray-500)', lineHeight: '1.5' }}>
+                เลือกหรือระบุยอดเงินบริจาคเพื่อทดสอบการทำงานของระบบแบบเรียลไทม์
+              </p>
+            </div>
+
+            {/* Quick Amount Preset Buttons */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)', display: 'block', marginBottom: '8px' }}>
+                เลือกยอดเงินหยอดด่วน:
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                {[20, 50, 100, 500, 1000].map((amt) => (
+                  <button
+                    key={amt}
+                    type="button"
+                    disabled={isSimulating}
+                    onClick={() => handleSimulateDonation(amt)}
+                    style={{
+                      padding: '0.6rem',
+                      borderRadius: '8px',
+                      border: '1px solid #E2E8F0',
+                      background: '#F8FAFC',
+                      color: '#059669',
+                      fontWeight: 700,
+                      fontSize: '0.95rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    + ฿{amt}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Amount Form */}
+            <form onSubmit={(e) => { e.preventDefault(); handleSimulateDonation(customAmount); }}>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)', display: 'block', marginBottom: '6px' }}>
+                  หรือระบุจำนวนเงินเอง (บาท):
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="number"
+                    min="1"
+                    step="any"
+                    placeholder="ใส่จำนวนเงิน เช่น 150"
+                    value={customAmount}
+                    onChange={(e) => setCustomAmount(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem 1rem',
+                      borderRadius: '8px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '1rem',
+                      fontWeight: 600,
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowSimulateModal(false)}
+                  disabled={isSimulating}
+                  style={{
+                    flex: 1,
+                    padding: '0.75rem 1rem',
+                    borderRadius: '8px',
+                    border: '1px solid #CBD5E1',
+                    background: 'white',
+                    color: 'var(--gray-700)',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSimulating || !customAmount}
+                  style={{
+                    flex: 1.2,
+                    padding: '0.75rem 1rem',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: '#10B981',
+                    color: 'white',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    opacity: (isSimulating || !customAmount) ? 0.6 : 1
+                  }}
+                >
+                  {isSimulating ? (
+                    <>
+                      <i className="fa-solid fa-spinner fa-spin"></i>
+                      กำลังบันทึก...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={18} />
+                      ยืนยันหยอดเงิน
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Tax Document Modal */}
+      <TaxDocumentModal
+        isOpen={isTaxModalOpen}
+        onClose={() => setIsTaxModalOpen(false)}
+        documentData={taxDocData}
+      />
+
     </section>
   );
 }
+
