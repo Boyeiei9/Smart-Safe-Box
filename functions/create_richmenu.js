@@ -41,7 +41,7 @@ const imagePath = process.argv[2];
 
 if (!imagePath) {
     console.log("❌ กรุณาระบุที่อยู่ไฟล์รูปภาพของริชเมนู เช่น:");
-    console.log('node functions/create_richmenu.js "C:\\วัดโคกtiger\\รูปอุปกรณ์\\Admin.png"');
+    console.log('node functions/create_richmenu.js "C:\\วัดโคกเสือ\\รูปอุปกรณ์\\Admin.png"');
     process.exit(1);
 }
 
