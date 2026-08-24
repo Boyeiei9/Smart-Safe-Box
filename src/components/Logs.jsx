@@ -110,22 +110,30 @@ export default function Logs() {
                   </td>
                 </tr>
               ) : (
-                filteredLogs.map((log) => (
-                  <tr key={log.id}>
-                    <td style={{ display: 'flex', alignItems: 'center', gap: '6px', borderBottom: 'none' }}>
-                      <Calendar size={14} className="text-gray-500" />
-                      {formatDate(log.timestamp)}
-                    </td>
-                    <td style={{ fontWeight: 700, color: 'var(--primary)' }}>{log.action}</td>
-                    <td>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                      <i className="fa-solid fa-user-circle text-gray-400" />
-                        {log.user}
-                      </span>
-                    </td>
-                    <td style={{ color: 'var(--gray-500)' }}>{log.note}</td>
-                  </tr>
-                ))
+                filteredLogs.map((log) => {
+                  const isResetAction = log.action && log.action.includes('รีเซ็ต');
+                  return (
+                    <tr key={log.id}>
+                      <td style={{ display: 'flex', alignItems: 'center', gap: '6px', borderBottom: 'none' }}>
+                        <Calendar size={14} className="text-gray-500" />
+                        {formatDate(log.timestamp)}
+                      </td>
+                      <td style={{ fontWeight: 700, color: isResetAction ? '#059669' : 'var(--primary)' }}>
+                        {isResetAction && <i className="fa-solid fa-rotate-left" style={{ marginRight: '6px' }} />}
+                        {log.action}
+                      </td>
+                      <td>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <i className="fa-solid fa-user-circle text-gray-400" />
+                          {log.user}
+                        </span>
+                      </td>
+                      <td style={{ color: isResetAction ? '#047857' : 'var(--gray-500)', fontWeight: isResetAction ? 600 : 400 }}>
+                        {log.note}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
