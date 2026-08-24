@@ -21,7 +21,7 @@ export default function TaxDocumentModal({ isOpen, onClose, documentData }) {
     window.print();
   };
 
-  const templeName = documentData.templeName || 'วัดโคก';
+  const templeName = documentData.templeName || 'วัดโคกเสือ';
   const totalAmount = documentData.amount || 0;
   const bahtText = arabicToThaiBaht(totalAmount);
   const items = documentData.items || [];

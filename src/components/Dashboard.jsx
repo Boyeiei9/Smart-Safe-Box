@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { doc, onSnapshot, collection, query, orderBy, limit, setDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import { Wallet, CalendarRange, BarChart3, TrendingUp, RefreshCw, RotateCcw, Calendar, History, Coins, CheckCircle2, AlertTriangle, FileText, PlusCircle, Sparkles, CalendarDays, Filter } from 'lucide-react';
+import { Wallet, CalendarRange, BarChart3, TrendingUp, RefreshCw, RotateCcw, Calendar, History, CheckCircle2, AlertTriangle, FileText, CalendarDays, Filter } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import TaxDocumentModal from './TaxDocumentModal';
 
@@ -18,11 +18,6 @@ export default function Dashboard() {
   const [resetLoading, setResetLoading] = useState(true);
   const [showResetModal, setShowResetModal] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
-
-  // Simulation State
-  const [showSimulateModal, setShowSimulateModal] = useState(false);
-  const [customAmount, setCustomAmount] = useState('');
-  const [isSimulating, setIsSimulating] = useState(false);
 
   // Tax Modal State
   const [taxDocData, setTaxDocData] = useState(null);
@@ -286,7 +281,7 @@ export default function Dashboard() {
     if (type === 'single') {
       setTaxDocData({
         type: 'single',
-        templeName: 'วัดโคก',
+        templeName: 'วัดโคกเสือ',
         docNo: `TAX-${data.timestamp ? new Date(data.timestamp).getTime().toString().slice(-6) : Date.now().toString().slice(-6)}`,
         timestamp: data.timestamp,
         periodLabel: `รอบรีเซ็ตเมื่อ ${formatDateTime(data.timestamp)}`,
@@ -298,7 +293,7 @@ export default function Dashboard() {
     } else if (type === 'monthly') {
       setTaxDocData({
         type: 'monthly',
-        templeName: 'วัดโคก',
+        templeName: 'วัดโคกเสือ',
         docNo: `TAX-M-${data.periodKey.replace('-', '')}`,
         timestamp: data.timestamp,
         periodLabel: data.periodLabel,
@@ -310,7 +305,7 @@ export default function Dashboard() {
     } else if (type === 'yearly') {
       setTaxDocData({
         type: 'yearly',
-        templeName: 'วัดโคก',
+        templeName: 'วัดโคกเสือ',
         docNo: `TAX-Y-${data.periodKey}`,
         timestamp: data.timestamp,
         periodLabel: data.periodLabel,
@@ -323,55 +318,13 @@ export default function Dashboard() {
     setIsTaxModalOpen(true);
   };
 
-  // Perform Simulate Donation
-  const handleSimulateDonation = async (amountToDonate) => {
-    const val = parseFloat(amountToDonate);
-    if (isNaN(val) || val <= 0) {
-      alert('โปรดระบุจำนวนเงินบริจาคที่ถูกต้อง (มากกว่า 0 บาท)');
-      return;
-    }
-
-    setIsSimulating(true);
-    try {
-      // 1. Record to Donation collection
-      // Cloud Function (updateTotalDonation) will automatically add val to donation/total
-      await addDoc(collection(db, 'Donation'), {
-        amount: val,
-        timestamp: serverTimestamp()
-      });
-
-      // 2. Record to SystemLogs
-      await addDoc(collection(db, 'SystemLogs'), {
-        action: 'จำลองการหยอดเงินบริจาคเข้าตู้',
-        user: 'ผู้ทดสอบ (Web Dashboard)',
-        note: `จำลองการหยอดเงินบริจาคจำนวน ฿${formatCurrency(val)} บาท`,
-        type: 'user',
-        timestamp: serverTimestamp()
-      });
-
-      confetti({
-        particleCount: 80,
-        spread: 60,
-        origin: { y: 0.6 }
-      });
-
-      setShowSimulateModal(false);
-      setCustomAmount('');
-    } catch (err) {
-      console.error('Error simulating donation:', err);
-      alert('เกิดข้อผิดพลาดในการจำลองหยอดเงิน: ' + err.message);
-    } finally {
-      setIsSimulating(false);
-    }
-  };
-
   return (
     <section className="page-section">
 
-      {/* Top Banner / Simulation Action Bar */}
+      {/* Top Banner */}
       <div style={{
         display: 'flex',
-        justify: 'space-between',
+        justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: '1.25rem',
         gap: '1rem',
@@ -379,33 +332,9 @@ export default function Dashboard() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--gray-600)' }}>
-            ระบบตู้บริจาคเงินอัจฉริยะ วัดโคก
+            ระบบตู้บริจาคเงินอัจฉริยะ วัดโคกเสือ
           </span>
         </div>
-        <button
-          type="button"
-          className="btn-simulate-trigger"
-          onClick={() => setShowSimulateModal(true)}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '0.6rem 1.2rem',
-            borderRadius: '999px',
-            border: 'none',
-            background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-            color: 'white',
-            fontWeight: 700,
-            fontSize: '0.9rem',
-            cursor: 'pointer',
-            boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-            transition: 'all 0.2s ease'
-          }}
-        >
-          <Sparkles size={16} />
-          <PlusCircle size={18} />
-          จำลองการหยอดเงินบริจาค
-        </button>
       </div>
 
       {/* Stat Cards */}
@@ -589,165 +518,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Simulation Donation Modal */}
-      {showSimulateModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(15, 23, 42, 0.65)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 9999,
-          padding: '1rem'
-        }}>
-          <div style={{
-            background: 'white',
-            borderRadius: '16px',
-            maxWidth: '460px',
-            width: '100%',
-            padding: '2rem',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-            animation: 'fadeIn 0.2s ease-out'
-          }}>
-            <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
-              <div style={{
-                width: '56px',
-                height: '56px',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                color: '#10B981',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '1rem'
-              }}>
-                <Coins size={28} />
-              </div>
-              <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 700, color: 'var(--dark)' }}>
-                จำลองการหยอดเงินเข้าตู้บริจาค
-              </h3>
-              <p style={{ marginTop: '8px', fontSize: '0.925rem', color: 'var(--gray-500)', lineHeight: '1.5' }}>
-                เลือกหรือระบุยอดเงินบริจาคเพื่อทดสอบการทำงานของระบบแบบเรียลไทม์
-              </p>
-            </div>
 
-            {/* Quick Amount Preset Buttons */}
-            <div style={{ marginBottom: '1.25rem' }}>
-              <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)', display: 'block', marginBottom: '8px' }}>
-                เลือกยอดเงินหยอดด่วน:
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                {[20, 50, 100, 500, 1000].map((amt) => (
-                  <button
-                    key={amt}
-                    type="button"
-                    disabled={isSimulating}
-                    onClick={() => handleSimulateDonation(amt)}
-                    style={{
-                      padding: '0.6rem',
-                      borderRadius: '8px',
-                      border: '1px solid #E2E8F0',
-                      background: '#F8FAFC',
-                      color: '#059669',
-                      fontWeight: 700,
-                      fontSize: '0.95rem',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    + ฿{amt}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Custom Amount Form */}
-            <form onSubmit={(e) => { e.preventDefault(); handleSimulateDonation(customAmount); }}>
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)', display: 'block', marginBottom: '6px' }}>
-                  หรือระบุจำนวนเงินเอง (บาท):
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="number"
-                    min="1"
-                    step="any"
-                    placeholder="ใส่จำนวนเงิน เช่น 150"
-                    value={customAmount}
-                    onChange={(e) => setCustomAmount(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '0.75rem 1rem',
-                      borderRadius: '8px',
-                      border: '1px solid #CBD5E1',
-                      fontSize: '1rem',
-                      fontWeight: 600,
-                      outline: 'none',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowSimulateModal(false)}
-                  disabled={isSimulating}
-                  style={{
-                    flex: 1,
-                    padding: '0.75rem 1rem',
-                    borderRadius: '8px',
-                    border: '1px solid #CBD5E1',
-                    background: 'white',
-                    color: 'var(--gray-700)',
-                    fontWeight: 600,
-                    cursor: 'pointer'
-                  }}
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSimulating || !customAmount}
-                  style={{
-                    flex: 1.2,
-                    padding: '0.75rem 1rem',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: '#10B981',
-                    color: 'white',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '6px',
-                    opacity: (isSimulating || !customAmount) ? 0.6 : 1
-                  }}
-                >
-                  {isSimulating ? (
-                    <>
-                      <i className="fa-solid fa-spinner fa-spin"></i>
-                      กำลังบันทึก...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 size={18} />
-                      ยืนยันหยอดเงิน
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Tax Document Modal */}
       <TaxDocumentModal

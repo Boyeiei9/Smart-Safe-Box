@@ -71,7 +71,7 @@ exports.lineWebhook = onRequest(async (req, res) => {
                                     },
                                     {
                                         type: "text",
-                                        text: "ระบบตู้บริจาคอัจฉริยะ วัดโคก",
+                                        text: "ระบบตู้บริจาคอัจฉริยะ วัดโคกเสือ",
                                         weight: "bold",
                                         size: "md",
                                         color: "#2c3e50"

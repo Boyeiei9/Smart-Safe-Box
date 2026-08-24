@@ -134,7 +134,7 @@ export default function History() {
     if (type === 'single') {
       setTaxDocData({
         type: 'single',
-        templeName: 'วัดโคก',
+        templeName: 'วัดโคกเสือ',
         docNo: `TAX-${data.timestamp ? new Date(data.timestamp).getTime().toString().slice(-6) : Date.now().toString().slice(-6)}`,
         timestamp: data.timestamp,
         periodLabel: `รอบรีเซ็ตเมื่อ ${formatDate(data.timestamp)}`,
@@ -146,7 +146,7 @@ export default function History() {
     } else if (type === 'monthly') {
       setTaxDocData({
         type: 'monthly',
-        templeName: 'วัดโคก',
+        templeName: 'วัดโคกเสือ',
         docNo: `TAX-M-${data.periodKey.replace('-', '')}`,
         timestamp: data.timestamp,
         periodLabel: data.periodLabel,
@@ -158,7 +158,7 @@ export default function History() {
     } else if (type === 'yearly') {
       setTaxDocData({
         type: 'yearly',
-        templeName: 'วัดโคก',
+        templeName: 'วัดโคกเสือ',
         docNo: `TAX-Y-${data.periodKey}`,
         timestamp: data.timestamp,
         periodLabel: data.periodLabel,
