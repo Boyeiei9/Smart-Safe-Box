@@ -13,6 +13,107 @@ export default function Alerts() {
     return new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
   };
 
+  const normalizeCategory = (data) => {
+    const type = (data.type || '').toLowerCase();
+    const msg = (data.message || '').toLowerCase();
+    const cat = (data.category || '').toLowerCase();
+
+    // การสั่นสะเทือน, กระทบกระเทือน, งัดแงะ ให้อยู่ในหมวด "ความปลอดภัย" เสมอ
+    if (
+      cat === 'security' ||
+      cat === 'ความปลอดภัย' ||
+      type.includes('สั่น') ||
+      type.includes('กระทบ') ||
+      type.includes('กระแทก') ||
+      type.includes('งัดแงะ') ||
+      type.includes('ขโมย') ||
+      msg.includes('สั่น') ||
+      msg.includes('กระทบ') ||
+      msg.includes('กระแทก') ||
+      msg.includes('งัดแงะ')
+    ) {
+      return 'security';
+    }
+    return 'system';
+  };
+
+  const getSeverityInfo = (severity) => {
+    const sev = (severity || '').toString().toLowerCase().trim();
+
+    if (
+      sev === 'very_high' ||
+      sev === 'very high' ||
+      sev === 'critical' ||
+      sev === 'สูงมาก' ||
+      sev.includes('สูงมาก') ||
+      sev.includes('วิกฤต')
+    ) {
+      // 🔴 แดงโปร่ง (สูงมาก - วิกฤต)
+      return {
+        text: 'สูงมาก',
+        style: {
+          backgroundColor: '#FEF2F2',
+          color: '#DC2626',
+          border: '1px solid rgba(220, 38, 38, 0.3)',
+          padding: '0.35rem 0.85rem',
+          borderRadius: '999px',
+          fontWeight: 600,
+          fontSize: '0.85rem',
+          display: 'inline-flex',
+          alignItems: 'center'
+        }
+      };
+    } else if (sev === 'high' || sev === 'สูง') {
+      // 🟠 ส้มโปร่ง (สูง)
+      return {
+        text: 'สูง',
+        style: {
+          backgroundColor: '#FFF7ED',
+          color: '#EA580C',
+          border: '1px solid rgba(234, 88, 12, 0.35)',
+          padding: '0.35rem 0.85rem',
+          borderRadius: '999px',
+          fontWeight: 600,
+          fontSize: '0.85rem',
+          display: 'inline-flex',
+          alignItems: 'center'
+        }
+      };
+    } else if (sev === 'medium' || sev === 'ปานกลาง') {
+      // 🟢 เขียวโปร่ง (ปานกลาง)
+      return {
+        text: 'ปานกลาง',
+        style: {
+          backgroundColor: '#ECFDF5',
+          color: '#059669',
+          border: '1px solid rgba(16, 185, 129, 0.3)',
+          padding: '0.35rem 0.85rem',
+          borderRadius: '999px',
+          fontWeight: 600,
+          fontSize: '0.85rem',
+          display: 'inline-flex',
+          alignItems: 'center'
+        }
+      };
+    } else {
+      // 🟢 เขียวโปร่ง (ต่ำ)
+      return {
+        text: 'ต่ำ',
+        style: {
+          backgroundColor: '#ECFDF5',
+          color: '#059669',
+          border: '1px solid rgba(16, 185, 129, 0.3)',
+          padding: '0.35rem 0.85rem',
+          borderRadius: '999px',
+          fontWeight: 600,
+          fontSize: '0.85rem',
+          display: 'inline-flex',
+          alignItems: 'center'
+        }
+      };
+    }
+  };
+
   useEffect(() => {
     const q = query(collection(db, 'Alerts'), orderBy('timestamp', 'desc'), limit(50));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -21,7 +122,7 @@ export default function Alerts() {
         const data = docSnap.data();
         alertList.push({
           id: docSnap.id,
-          category: data.category || 'security',
+          category: normalizeCategory(data),
           type: data.type || 'ผิดปกติ',
           message: data.message || '',
           severity: data.severity || 'Medium',
@@ -81,11 +182,11 @@ export default function Alerts() {
           <table className="styled-table">
             <thead>
               <tr>
-                <th>เวลา</th>
-                <th>ประเภท</th>
-                <th>หมวดหมู่</th>
+                <th style={{ whiteSpace: 'nowrap', width: '160px' }}>เวลา</th>
+                <th style={{ whiteSpace: 'nowrap', width: '150px' }}>ประเภท</th>
+                <th style={{ whiteSpace: 'nowrap', width: '140px' }}>หมวดหมู่</th>
                 <th>รายละเอียด</th>
-                <th>ความรุนแรง</th>
+                <th style={{ whiteSpace: 'nowrap', width: '110px', textAlign: 'center' }}>ความรุนแรง</th>
               </tr>
             </thead>
             <tbody>
@@ -107,35 +208,26 @@ export default function Alerts() {
                 </tr>
               ) : (
                 filteredAlerts.map((alert) => {
-                  let sevClass = '';
-                  let sevText = '';
-                  if (alert.severity === 'High') {
-                    sevClass = 'bg-rose text-white';
-                    sevText = 'สูงมาก (วิกฤต)';
-                  } else if (alert.severity === 'Medium') {
-                    sevClass = 'bg-orange text-white';
-                    sevText = 'ปานกลาง';
-                  } else {
-                    sevClass = 'bg-blue text-white';
-                    sevText = 'ต่ำ (แจ้งทราบ)';
-                  }
+                  const sevInfo = getSeverityInfo(alert.severity);
 
                   return (
                     <tr key={alert.id}>
-                      <td style={{ display: 'flex', alignItems: 'center', gap: '6px', borderBottom: 'none' }}>
-                        <Calendar size={14} className="text-gray-500" />
-                        {formatDate(alert.timestamp)}
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                          <Calendar size={14} className="text-gray-500" />
+                          <span>{formatDate(alert.timestamp)}</span>
+                        </div>
                       </td>
-                      <td style={{ fontWeight: 600 }}>{alert.type}</td>
-                      <td>
+                      <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{alert.type}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <span className={`badge ${alert.category === 'security' ? 'badge-security' : 'badge-system'}`}>
                           {alert.category === 'security' ? 'ความปลอดภัย' : 'ระบบและพลังงาน'}
                         </span>
                       </td>
-                      <td>{alert.message}</td>
-                      <td>
-                        <span className={`badge ${sevClass}`} style={{ padding: '4px 8px', borderRadius: '4px' }}>
-                          {sevText}
+                      <td style={{ minWidth: '220px', lineHeight: 1.5 }}>{alert.message}</td>
+                      <td style={{ whiteSpace: 'nowrap', textAlign: 'center' }}>
+                        <span style={sevInfo.style}>
+                          {sevInfo.text}
                         </span>
                       </td>
                     </tr>

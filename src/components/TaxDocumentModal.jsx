@@ -1,11 +1,39 @@
-import React, { useState } from 'react';
-import { Printer, Download, X, FileCheck, Building2, Calendar, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Printer, Download, X, FileCheck, Building2, Calendar, ShieldCheck, CheckCircle2, Image as ImageIcon, ExternalLink, Info } from 'lucide-react';
 import { arabicToThaiBaht } from '../utils/thaiBaht';
+import templeLogo from '../assets/temple-logo.jpg';
 
 export default function TaxDocumentModal({ isOpen, onClose, documentData }) {
   if (!isOpen || !documentData) return null;
 
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
+  const [isFitMobile, setIsFitMobile] = useState(() => {
+    return typeof window !== 'undefined' && window.innerWidth < 860;
+  });
+  const [mobileScale, setMobileScale] = useState(1);
+  const [pageHeights, setPageHeights] = useState({});
+  const printRef = useRef(null);
+
+  // Keep mobile preview scaling responsive to screen width
+  useEffect(() => {
+    const updateMobileScale = () => {
+      if (typeof window !== 'undefined' && printRef.current) {
+        const availableW = printRef.current.clientWidth - 20;
+        if (isFitMobile && availableW < 820 && availableW > 0) {
+          setMobileScale(availableW / 820);
+        } else {
+          setMobileScale(1);
+        }
+      }
+    };
+    updateMobileScale();
+    window.addEventListener('resize', updateMobileScale);
+    return () => window.removeEventListener('resize', updateMobileScale);
+  }, [isFitMobile, isOpen]);
+
+  const isLineBrowser = typeof navigator !== 'undefined' && /Line\//i.test(navigator.userAgent);
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
@@ -21,13 +49,175 @@ export default function TaxDocumentModal({ isOpen, onClose, documentData }) {
     window.print();
   };
 
+  const generatePageCanvas = async (pageElement) => {
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+    const html2canvas = (await import('html2canvas')).default;
+
+    return await html2canvas(pageElement, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      backgroundColor: '#ffffff',
+      windowWidth: 1024,
+      onclone: (clonedDoc) => {
+        // Reset any mobile scaling in canvas export
+        const clonedWrappers = clonedDoc.querySelectorAll('.tax-doc-scaled-wrapper');
+        clonedWrappers.forEach((w) => {
+          w.style.height = 'auto';
+          w.style.overflow = 'visible';
+          w.style.marginBottom = '0';
+        });
+        const clonedPages = clonedDoc.querySelectorAll('.tax-document-page');
+        clonedPages.forEach((p) => {
+          p.style.transform = 'none';
+        });
+
+        const clonedFrame = clonedDoc.querySelector('.tax-document-frame');
+        if (clonedFrame) {
+          clonedFrame.style.width = '840px';
+          clonedFrame.style.minWidth = '840px';
+          clonedFrame.style.maxWidth = '840px';
+          clonedFrame.style.padding = '24px 28px';
+          clonedFrame.style.margin = '0 auto';
+          clonedFrame.style.boxSizing = 'border-box';
+          clonedFrame.style.backgroundColor = '#ffffff';
+
+          // Show footer in PDF/image export
+          const pdfFooter = clonedFrame.querySelector('.pdf-only-footer');
+          if (pdfFooter) {
+            pdfFooter.style.display = 'block';
+          }
+        }
+      }
+    });
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!printRef.current || isGeneratingPdf) return;
+    setIsGeneratingPdf(true);
+
+    try {
+      if (isLineBrowser) {
+        // LINE In-App browser blocks direct Blob file downloads
+        alert('เบราว์เซอร์ของแอป LINE บล็อกการดาวน์โหลดไฟล์ PDF โดยตรง ระบบจะเปิดรูปภาพเอกสารให้ท่านแตะค้างเพื่อ "บันทึกรูปภาพ" ลงเครื่องแทนครับ (หรือกดปุ่ม "เปิดใน Chrome/Safari" ด้านบนเพื่อโหลด PDF)');
+        const firstPageEl = printRef.current.querySelector('.tax-document-page') || printRef.current;
+        const canvas = await generatePageCanvas(firstPageEl);
+        const imgData = canvas.toDataURL('image/png');
+        setPreviewImage(imgData);
+        return;
+      }
+
+      const { jsPDF } = await import('jspdf');
+      const pageElements = printRef.current.querySelectorAll('.tax-document-page');
+
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+
+      const margin = 8;
+      const printWidth = pageWidth - (margin * 2);
+      const maxPageContentHeightMm = pageHeight - (margin * 2);
+
+      for (let pIdx = 0; pIdx < pageElements.length; pIdx++) {
+        const pageEl = pageElements[pIdx];
+        const canvas = await generatePageCanvas(pageEl);
+
+        const imgData = canvas.toDataURL('image/jpeg', 0.95);
+        const actualPrintHeightMm = Math.min((canvas.height * printWidth) / canvas.width, maxPageContentHeightMm);
+
+        if (pIdx > 0) {
+          pdf.addPage();
+        }
+        pdf.addImage(imgData, 'JPEG', margin, margin, printWidth, actualPrintHeightMm);
+      }
+
+      pdf.save(`${docNo}.pdf`);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('เกิดข้อผิดพลาดในการสร้าง PDF กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  const handleSaveImage = async () => {
+    if (!printRef.current || isGeneratingImage) return;
+    setIsGeneratingImage(true);
+
+    try {
+      const firstPageEl = printRef.current.querySelector('.tax-document-page') || printRef.current;
+      const canvas = await generatePageCanvas(firstPageEl);
+      const imgData = canvas.toDataURL('image/png');
+      setPreviewImage(imgData);
+    } catch (error) {
+      console.error('Error generating image:', error);
+      alert('เกิดข้อผิดพลาดในการสร้างรูปภาพ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
+
+  const handleOpenExternal = () => {
+    const currentUrl = new URL(window.location.href);
+    currentUrl.searchParams.set('openExternalBrowser', '1');
+    window.location.href = currentUrl.toString();
+  };
+
   const templeName = documentData.templeName || 'วัดโคกเสือ';
   const totalAmount = documentData.amount || 0;
   const bahtText = arabicToThaiBaht(totalAmount);
-  const items = documentData.items || [];
+  const rawItems = documentData.items || [];
+  // Sort items ascending by date/month (earliest month first, cascading downwards)
+  const items = [...rawItems].sort((a, b) => {
+    const ta = a.timestamp ? (a.timestamp instanceof Date ? a.timestamp.getTime() : (typeof a.timestamp.toDate === 'function' ? a.timestamp.toDate().getTime() : new Date(a.timestamp).getTime())) : 0;
+    const tb = b.timestamp ? (b.timestamp instanceof Date ? b.timestamp.getTime() : (typeof b.timestamp.toDate === 'function' ? b.timestamp.toDate().getTime() : new Date(b.timestamp).getTime())) : 0;
+    return ta - tb;
+  });
   const isGrouped = items.length > 0;
   const docNo = documentData.docNo || `TAX-${Date.now().toString().slice(-6)}`;
   const issueDate = formatDateOnly(new Date());
+
+  // Helper: Chunk items into pages intelligently
+  // A single page can comfortably hold up to 18 items with full header + signatures + footer.
+  const chunkItemsForPages = (list) => {
+    if (!list || list.length === 0) return [[]];
+    const totalCount = list.length;
+    if (totalCount <= 18) {
+      return [list];
+    }
+    if (totalCount <= 40) {
+      const lastPageCount = Math.min(18, Math.max(8, Math.floor(totalCount / 2)));
+      const page1Count = totalCount - lastPageCount;
+      return [list.slice(0, page1Count), list.slice(page1Count)];
+    }
+    const pages = [];
+    const p1Count = Math.min(22, Math.ceil(totalCount / Math.ceil(totalCount / 22)));
+    pages.push(list.slice(0, p1Count));
+    let remaining = list.slice(p1Count);
+    while (remaining.length > 0) {
+      if (remaining.length <= 18) {
+        pages.push(remaining);
+        remaining = [];
+      } else if (remaining.length <= 36) {
+        const half = Math.ceil(remaining.length / 2);
+        pages.push(remaining.slice(0, half));
+        pages.push(remaining.slice(half));
+        remaining = [];
+      } else {
+        pages.push(remaining.slice(0, 24));
+        remaining = remaining.slice(24);
+      }
+    }
+    return pages;
+  };
+
+  const pageChunks = isGrouped
+    ? chunkItemsForPages(items)
+    : [[{ amount: totalAmount, timestamp: documentData.timestamp, note: documentData.note }]];
+  const totalPages = pageChunks.length;
 
   return (
     <div className="modal-backdrop print-modal-backdrop">
@@ -36,129 +226,414 @@ export default function TaxDocumentModal({ isOpen, onClose, documentData }) {
         <div className="modal-action-bar no-print">
           <div className="action-bar-title">
             <FileCheck size={20} className="text-indigo" />
-            <span>ตัวอย่างเอกสารทางการเงิน / ยื่นภาษี</span>
+            <span>ตัวอย่างเอกสารการเงิน {totalPages > 1 && `(${totalPages} แผ่น)`}</span>    
           </div>
-          <div className="action-bar-buttons">
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
-              <X size={16} /> ปิดหน้าต่าง
-            </button>
-            <button type="button" className="btn btn-primary" onClick={handlePrint}>
-              <Printer size={16} /> พิมพ์เอกสาร / บันทึกเป็น PDF
+          <div className="action-bar-right">
+            <div className="action-bar-buttons">
+              <button type="button" className="btn btn-primary btn-print" onClick={handlePrint}>
+                <Printer size={16} /> พิมพ์เอกสาร {totalPages > 1 && `(${totalPages} แผ่น)`}
+              </button>
+              <button type="button" className="btn btn-primary btn-download" onClick={handleDownloadPdf} disabled={isGeneratingPdf}
+                style={{ backgroundColor: '#059669' }}>
+                <Download size={16} /> {isGeneratingPdf ? 'กำลังสร้าง...' : `บันทึกเป็น PDF ${totalPages > 1 ? `(${totalPages} หน้า)` : ''}`}
+              </button>
+              <button type="button" className="btn btn-secondary btn-image" onClick={handleSaveImage} disabled={isGeneratingImage}
+                style={{ borderColor: '#6366F1', color: '#4F46E5', fontWeight: 600 }}>
+                <ImageIcon size={16} /> {isGeneratingImage ? 'กำลังแปลง...' : 'บันทึกเป็นรูปภาพ'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-scale-toggle"
+                onClick={() => setIsFitMobile(!isFitMobile)}
+                title={isFitMobile ? "ซูมดูขนาดจริง 100%" : "ย่อให้พอดีหน้าจอมือถือ"}
+                style={{ borderColor: '#8B5CF6', color: '#7C3AED', fontWeight: 600 }}
+              >
+                {isFitMobile ? '🔍 100%' : '📱 พอดีจอ'}
+              </button>
+            </div>
+            <button type="button" className="btn-close-modal" onClick={onClose} title="ปิดหน้าต่าง" aria-label="ปิด">
+              <X size={20} strokeWidth={2.5} />
             </button>
           </div>
         </div>
 
-        {/* Printable Tax Statement Document */}
-        <div className="tax-document-printable">
-          {/* Header */}
-          <div className="tax-doc-header">
-            <div className="temple-emblem">
-              <Building2 size={36} color="var(--primary, #4f46e5)" />
+        {/* LINE In-App Browser Notice */}
+        {isLineBrowser && (
+          <div className="no-print" style={{
+            backgroundColor: '#EFF6FF',
+            borderBottom: '1px solid #BFDBFE',
+            padding: '0.65rem 1.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '10px',
+            fontSize: '0.825rem',
+            color: '#1E40AF'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Info size={16} style={{ flexShrink: 0 }} />
+              <span>เปิดใน LINE: แนะนำใช้ <b>บันทึกเป็นรูปภาพ</b> หรือเปิดเบราว์เซอร์หลักเพื่อโหลด PDF</span>
             </div>
-            <div className="temple-info">
-              <h1 className="tax-doc-temple-name">{templeName}</h1>
-              <p className="tax-doc-subtext">ระบบตู้บริจาคเงินอัจฉริยะ (Smart Donate System)</p>
-              <h2 className="tax-doc-title">
-                ใบสรุปยอดเงินบริจาคเพื่อยื่นภาษีทางการเงิน / ใบสำคัญรับเงิน
-              </h2>
+            <button
+              type="button"
+              onClick={handleOpenExternal}
+              style={{
+                backgroundColor: '#2563EB',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '4px 10px',
+                fontSize: '0.775rem',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
+              }}>
+              <ExternalLink size={12} /> เปิดใน Chrome/Safari
+            </button>
+          </div>
+        )}
+
+        {/* Image Preview Overlay for saving to album */}
+        {previewImage && (
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            zIndex: 999999,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem'
+          }}>
+            <div style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              maxWidth: '500px',
+              width: '100%',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.3)'
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '0.85rem 1.25rem',
+                borderBottom: '1px solid #E2E8F0',
+                backgroundColor: '#F8FAFC'
+              }}>
+                <h3 style={{ margin: 0, fontSize: '0.95rem', color: '#1E293B', fontWeight: 700 }}>
+                  📸 รูปภาพเอกสาร (กดค้างที่รูปเพื่อบันทึก)
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setPreviewImage(null)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B' }}>
+                  <X size={20} />
+                </button>
+              </div>
+              <div style={{ padding: '1rem', overflowY: 'auto', textAlign: 'center' }}>
+                <p style={{ margin: '0 0 10px 0', fontSize: '0.825rem', color: '#059669', fontWeight: 600 }}>
+                  👉 แตะค้างที่รูปภาพด้านล่าง แล้วเลือก "บันทึกรูปภาพ" (Save Image)
+                </p>
+                <img
+                  src={previewImage}
+                  alt="Tax Document"
+                  style={{
+                    width: '100%',
+                    height: 'auto',
+                    borderRadius: '6px',
+                    border: '1px solid #CBD5E1',
+                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'
+                  }}
+                />
+              </div>
+              <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid #E2E8F0', textAlign: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setPreviewImage(null)}
+                  style={{ width: '100%', justifyContent: 'center' }}>
+                  ปิดหน้าต่างรูปภาพ
+                </button>
+              </div>
             </div>
           </div>
+        )}
 
-          <div className="tax-doc-divider" />
+        {/* Printable Tax Statement Document (Paginated) */}
+        <div className="tax-document-printable" ref={printRef}>
+          {pageChunks.map((chunk, pageIdx) => {
+            const isFirstPage = pageIdx === 0;
+            const isLastPage = pageIdx === totalPages - 1;
+            const pageStartIdx = pageChunks.slice(0, pageIdx).reduce((acc, c) => acc + c.length, 0);
+            const shouldScale = isFitMobile && mobileScale < 1;
 
-          {/* Document Meta Info */}
-          <div className="tax-doc-meta-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-            <div className="meta-item">
-              <span className="meta-label">เลขที่เอกสาร:</span>
-              <span className="meta-value font-mono">{docNo}</span>
-            </div>
-            <div className="meta-item">
-              <span className="meta-label">วันที่ออกเอกสาร:</span>
-              <span className="meta-value">{issueDate}</span>
-            </div>
-            <div className="meta-item">
-              <span className="meta-label">รอบ/ประจำ:</span>
-              <span className="meta-value" style={{ color: '#4F46E5' }}>
-                {documentData.periodLabel || (documentData.timestamp ? formatDateOnly(documentData.timestamp) : '-')}
-              </span>
-            </div>
-          </div>
+            return (
+              <div
+                key={pageIdx}
+                className="tax-doc-scaled-wrapper"
+                style={shouldScale ? {
+                  width: '100%',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  height: pageHeights[pageIdx] ? `${Math.round((pageHeights[pageIdx] + 30) * mobileScale)}px` : undefined,
+                  overflow: 'visible',
+                  marginBottom: '1rem'
+                } : undefined}
+              >
+                <div
+                  ref={(el) => {
+                    if (el && !pageHeights[pageIdx]) {
+                      setPageHeights(prev => ({ ...prev, [pageIdx]: el.offsetHeight }));
+                    }
+                  }}
+                  className="tax-document-page"
+                  style={shouldScale ? {
+                    transform: `scale(${mobileScale})`,
+                    transformOrigin: 'top center',
+                    marginBottom: 0
+                  } : undefined}
+                >
+                  {/* Formal Certificate Outer Frame */}
+                  <div className="tax-document-frame">
 
-          {/* Breakdown Table */}
-          <div className="tax-doc-table-wrapper">
-            <table className="tax-doc-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '8%', textAlign: 'center' }}>ลำดับ</th>
-                  <th>วันที่รีเซ็ต</th>
-                  <th>รายละเอียด</th>
-                  <th style={{ width: '22%', textAlign: 'right' }}>จำนวนเงิน (บาท)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {isGrouped ? (
-                  items.map((item, idx) => (
-                    <tr key={item.id || idx}>
-                      <td style={{ textAlign: 'center' }}>{idx + 1}</td>
-                      <td>{formatDateOnly(item.timestamp)}</td>
-                      <td>ยอดเงินบริจาค</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600 }}>฿{formatCurrency(item.amount)}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td style={{ textAlign: 'center' }}>1</td>
-                    <td>{formatDateOnly(documentData.timestamp)}</td>
-                    <td>ยอดเงินบริจาค</td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>฿{formatCurrency(totalAmount)}</td>
-                  </tr>
-                )}
-              </tbody>
-              <tfoot>
-                <tr className="total-row">
-                  <td colSpan="3" style={{ textAlign: 'right', fontWeight: 700 }}>
-                    ยอดเงินรวมทั้งสิ้น (Total Amount):
-                  </td>
-                  <td style={{ textAlign: 'right', fontWeight: 800, fontSize: '1.15rem', color: '#047857' }}>
-                    ฿{formatCurrency(totalAmount)}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                  {isFirstPage ? (
+                    <>
+                      {/* Header with Temple Logo */}
+                      <div className="tax-doc-header">
+                        <div className="temple-logo-wrapper">
+                          <img
+                            src={templeLogo}
+                            alt={`ตราสัญลักษณ์ ${templeName}`}
+                            className="temple-logo-img"
+                            crossOrigin="anonymous"
+                          />
+                        </div>
+                        <div className="temple-info">
+                          <div className="temple-header-top">
+                            <h1 className="tax-doc-temple-name">{templeName}</h1>
+                            <span className="temple-jurisdiction">สังกัดคณะสงฆ์มหานิกาย</span>
+                          </div>
+                          <p className="tax-doc-address">
+                            ตำบลโคกเสือ อำเภอบางไทร จังหวัดพระนครศรีอยุธยา 13190
+                          </p>
+                          <div className="tax-doc-title-banner">
+                            <h2 className="tax-doc-title">
+                              ใบสำคัญรับเงิน / ใบสรุปยอดเงินบริจาค
+                            </h2>
+                            <span className="tax-doc-subtitle">
+                              ระบบตู้บริจาคเงินอัจฉริยะ (Smart Safe Box System)
+                            </span>
+                          </div>
+                        </div>
+                      </div>
 
-          {/* Thai Baht Text Box */}
-          <div className="tax-doc-baht-box">
-            <span className="baht-label">จำนวนเงินตัวอักษร (Baht Text):</span>
-            <span className="baht-text">({bahtText})</span>
-          </div>
+                      <div className="tax-doc-divider-double" />
 
-          {/* Signatures */}
-          <div className="tax-doc-signatures" style={{ gridTemplateColumns: 'repeat(2, 1fr)', maxWidth: '600px', margin: '0 auto 2rem auto' }}>
-            <div className="sig-card">
-              <div className="sig-line"></div>
-              <p className="sig-name">( ............................................ )</p>
-              <p className="sig-title">เหรัญญิก / ไวยาวัจกร {templeName}</p>
-              <p className="sig-date">วันที่ ......../......../........</p>
-            </div>
-            <div className="sig-card">
-              <div className="sig-line"></div>
-              <p className="sig-name">( ............................................ )</p>
-              <p className="sig-title">เจ้าอาวาส {templeName}</p>
-              <p className="sig-date">วันที่ ......../......../........</p>
-            </div>
-          </div>
+                      {/* Document Meta Info Card */}
+                      <div className="tax-doc-meta-card">
+                        <div className="meta-card-grid">
+                          <div className="meta-col">
+                            <div className="meta-row">
+                              <span className="meta-lbl">หน่วยงานผู้ออก:</span>
+                              <span className="meta-val">{templeName} (ฝ่ายการเงินและศาสนสมบัติ)</span>
+                            </div>
+                            <div className="meta-row">
+                              <span className="meta-lbl">ประเภทเอกสาร:</span>
+                              <span className="meta-val">สรุปรายงานยอดบริจาคตู้เซฟอัจฉริยะ</span>
+                            </div>
+                            <div className="meta-row">
+                              <span className="meta-lbl">วัตถุประสงค์:</span>
+                              <span className="meta-val">เพื่อบำรุงพระอาราม บูรณปฏิสังขรณ์ และสาธารณประโยชน์</span>
+                            </div>
+                          </div>
 
-          {/* Official Footer Disclaimer */}
-          <div className="tax-doc-footer">
-            <div className="tax-doc-footer-badge">
-              <ShieldCheck size={16} />
-              <span>เอกสารทางการเงินออกโดยอัตโนมัติจากระบบตู้บริจาคเงินอัจฉริยะ {templeName}</span>
+                          <div className="meta-col meta-col-right">
+                            <div className="meta-row">
+                              <span className="meta-lbl">เลขที่เอกสาร:</span>
+                              <span className="meta-val font-mono meta-val-highlight">{docNo}</span>
+                            </div>
+                            <div className="meta-row">
+                              <span className="meta-lbl">วันที่ออกเอกสาร:</span>
+                              <span className="meta-val">{issueDate}</span>
+                            </div>
+                            <div className="meta-row">
+                              <span className="meta-lbl">รอบการจัดเก็บ:</span>
+                              <span className="meta-val meta-val-period">
+                                {documentData.periodLabel || (documentData.timestamp ? formatDateOnly(documentData.timestamp) : '-')}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Compact Continuation Header for Subsequent Pages */}
+                      <div className="tax-doc-header-continuation">
+                        <div className="cont-header-left">
+                          <h2 className="cont-temple-name">{templeName}</h2>
+                          <span className="cont-doc-title">ใบสำคัญรับเงิน / ใบสรุปยอดเงินบริจาค (ต่อ)</span>
+                        </div>
+                        <div className="cont-header-right">
+                          <span>เลขที่เอกสาร: <b>{docNo}</b></span>
+                          <span>รอบการจัดเก็บ: <b>{documentData.periodLabel || '-'}</b></span>
+                        </div>
+                      </div>
+                      <div className="tax-doc-divider-gold" />
+                    </>
+                  )}
+
+                  {/* Breakdown Table for this page chunk */}
+                  <div className="tax-doc-table-wrapper">
+                    <table className="tax-doc-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: '8%', textAlign: 'center' }}>ลำดับ</th>
+                          <th style={{ width: '22%', textAlign: 'center' }}>วันที่ทำรายการ</th>
+                          <th style={{ width: '45%', textAlign: 'left' }}>รายการ / วัตถุประสงค์การบริจาค</th>
+                          <th style={{ width: '25%', textAlign: 'right' }}>จำนวนเงิน (บาท)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {isGrouped ? (
+                          chunk.map((item, idx) => {
+                            const globalIdx = pageStartIdx + idx;
+                            return (
+                              <tr key={item.id || globalIdx}>
+                                <td style={{ textAlign: 'center', fontWeight: 600 }}>{globalIdx + 1}</td>
+                                <td style={{ textAlign: 'center' }}>{formatDateOnly(item.timestamp)}</td>
+                                <td style={{ textAlign: 'left' }}>
+                                  <span className="item-title">
+                                    เงินบริจาคสมทบทุน {templeName}
+                                  </span>
+                                  <span className="item-subtitle">
+                                    {item.note || `รอบการรีเซ็ตตู้บริจาคอัจฉริยะ (${item.resetBy || 'ผู้ดูแลระบบ'})`}
+                                  </span>
+                                </td>
+                                <td style={{ textAlign: 'right', fontWeight: 700 }} className="font-mono">
+                                  {formatCurrency(item.amount)}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td style={{ textAlign: 'center', fontWeight: 600 }}>1</td>
+                            <td style={{ textAlign: 'center' }}>{formatDateOnly(documentData.timestamp)}</td>
+                            <td style={{ textAlign: 'left' }}>
+                              <span className="item-title">
+                                เงินบริจาคสมทบทุน {templeName}
+                              </span>
+                              <span className="item-subtitle">
+                                {documentData.note || 'สรุปยอดเงินบริจาคจากตู้บริจาคอัจฉริยะประจำรอบ'}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700 }} className="font-mono">
+                              {formatCurrency(totalAmount)}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                      {isLastPage && (
+                        <tfoot>
+                          <tr className="total-row">
+                            <td colSpan="3" style={{ textAlign: 'right', fontWeight: 700 }}>
+                              ยอดเงินรวมสุทธิทั้งสิ้น (Total Net Amount):
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 800, fontSize: '1.25rem', color: '#047857' }} className="font-mono">
+                              <span className="total-amount-display">
+                                {formatCurrency(totalAmount)}
+                              </span>
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+
+                  {!isLastPage && (
+                    <div className="tax-doc-continuation-note">
+                      — มีรายการต่อในแผ่นถัดไป (หน้า {pageIdx + 1}/{totalPages}) —
+                    </div>
+                  )}
+
+                  {isLastPage && (
+                    <>
+                      {/* Thai Baht Text Box */}
+                      <div className="tax-doc-baht-box">
+                        <span className="baht-label">จำนวนเงินตัวอักษร (Baht Text):</span>
+                        <span className="baht-text">( {bahtText} )</span>
+                      </div>
+
+                      {/* Official Signatures & Seal Section */}
+                      <div className="tax-doc-signatures-wrapper">
+                        <div className="tax-doc-signatures">
+                          {/* Signatory 1: Treasurer */}
+                          <div className="sig-card">
+                            <p className="sig-role-header">ผู้จัดทำรายงาน / ผู้ส่งมอบเงิน</p>
+                            <div className="sig-space">
+                              <div className="sig-line"></div>
+                            </div>
+                            <p className="sig-name">( ............................................................ )</p>
+                            <p className="sig-title">เหรัญญิก / คณะกรรมการฝ่ายการเงิน</p>
+                            <p className="sig-date">วันที่ .......... / .......... / ................</p>
+                          </div>
+
+                          {/* Seal Stamp Placeholder */}
+                          <div className="seal-card">
+                            <div className="seal-circle">
+                              <div className="seal-inner">
+                                <span className="seal-text-top">ประทับตรา</span>
+                                <span className="seal-text-main">วัดโคกเสือ</span>
+                                <span className="seal-text-sub">(สำคัญ)</span>
+                              </div>
+                            </div>
+                            <p className="seal-caption">ตราประทับวัดประจำหน่วยงาน</p>
+                          </div>
+
+                          {/* Signatory 2: Abbot */}
+                          <div className="sig-card">
+                            <p className="sig-role-header">ผู้รับรองรายงาน / เจ้าอาวาส</p>
+                            <div className="sig-space">
+                              <div className="sig-line"></div>
+                            </div>
+                            <p className="sig-name">( ............................................................ )</p>
+                            <p className="sig-title">เจ้าอาวาส {templeName}</p>
+                            <p className="sig-date">วันที่ .......... / .......... / ................</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Official Footer Disclaimer (hidden in preview, shown in PDF/image export) */}
+                      <div className="tax-doc-footer pdf-only-footer">
+                        <div className="tax-doc-footer-badge">
+                          <ShieldCheck size={16} />
+                          <span>เอกสารการเงินออกโดยระบบตู้บริจาคเงินอัจฉริยะ (Smart Safe Box) — {templeName}</span>
+                        </div>
+                        <p className="tax-doc-footer-note">
+                          เอกสารนี้เป็นหลักฐานทางการเงินที่ถูกต้อง ใช้สำหรับตรวจสอบบัญชีศาสนสมบัติและประกอบการยื่นรายงานต่อคณะสงฆ์และหน่วยงานทางการเงิน
+                        </p>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Official Page Number Indicator */}
+                  <div className="tax-doc-page-number">
+                    หน้า {pageIdx + 1} จาก {totalPages}
+                  </div>
+                </div>
+              </div>
             </div>
-            <p className="tax-doc-footer-note">
-              เอกสารฉบับนี้ใช้สำหรับเป็นหลักฐานประกอบการลงบัญชีทางการเงินและยื่นต่อกรมสรรพากร/หน่วยงานที่เกี่ยวข้อง
-            </p>
-          </div>
+          );
+          })}
         </div>
       </div>
     </div>

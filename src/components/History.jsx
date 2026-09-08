@@ -29,7 +29,7 @@ export default function History() {
 
   // Subscribe to Donations
   useEffect(() => {
-    const q = query(collection(db, 'Donation'), orderBy('timestamp', 'desc'), limit(100));
+    const q = query(collection(db, 'DonationLogs'), orderBy('timestamp', 'desc'), limit(100));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const donationList = [];
       snapshot.forEach((docSnap) => {
@@ -99,6 +99,15 @@ export default function History() {
       groups[monthYearKey].items.push(item);
     });
 
+    // Sort items inside each month chronologically (earliest first)
+    Object.values(groups).forEach(g => {
+      g.items.sort((a, b) => {
+        const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return ta - tb;
+      });
+    });
+
     return Object.values(groups).sort((a, b) => b.periodKey.localeCompare(a.periodKey));
   }, [resetHistory]);
 
@@ -124,6 +133,15 @@ export default function History() {
       groups[yearKey].amount += item.amount;
       groups[yearKey].count += 1;
       groups[yearKey].items.push(item);
+    });
+
+    // Sort items inside each year chronologically (January to December - earliest month first)
+    Object.values(groups).forEach(g => {
+      g.items.sort((a, b) => {
+        const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return ta - tb;
+      });
     });
 
     return Object.values(groups).sort((a, b) => b.periodKey.localeCompare(a.periodKey));
@@ -171,6 +189,31 @@ export default function History() {
     setIsTaxModalOpen(true);
   };
 
+  // Auto open document if requested via URL parameter (e.g. from LINE Bot link)
+  useEffect(() => {
+    if (loadingResets || resetHistory.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const docType = params.get('docType');
+    const docNoParam = params.get('docNo');
+    const openDoc = params.get('openDoc');
+
+    if (docType || openDoc || docNoParam) {
+      if (docType === 'monthly' && monthlyResets.length > 0) {
+        const found = monthlyResets.find(m => `TAX-M-${m.periodKey.replace('-', '')}` === docNoParam) || monthlyResets[0];
+        openTaxDocument('monthly', found);
+      } else if (docType === 'yearly' && yearlyResets.length > 0) {
+        const found = yearlyResets.find(y => `TAX-Y-${y.periodKey}` === docNoParam) || yearlyResets[0];
+        openTaxDocument('yearly', found);
+      } else if (resetHistory.length > 0) {
+        const found = resetHistory.find(item => {
+          const expectedNo = `TAX-${item.timestamp ? new Date(item.timestamp).getTime().toString().slice(-6) : ''}`;
+          return expectedNo === docNoParam;
+        }) || resetHistory[0];
+        openTaxDocument('single', found);
+      }
+    }
+  }, [loadingResets, resetHistory, monthlyResets, yearlyResets]);
+
   return (
     <section className="page-section">
       <div className="card glass-panel" style={{ padding: '2rem' }}>
@@ -178,7 +221,14 @@ export default function History() {
           <div>
             <h2>
               <HistoryIcon className="text-indigo" size={22} />
-              {viewMode === 'donations' ? 'ประวัติการบริจาค (เรียงตามล่าสุด)' : 'สรุปยอดเงินจากการรีเซ็ตย้อนหลัง'}
+              {viewMode === 'donations' 
+                ? 'ประวัติการบริจาค (เรียงตามล่าสุด)' 
+                : resetPeriod === 'monthly'
+                  ? 'สรุปยอดเงินจากการรีเซ็ตย้อนหลัง - รายเดือน'
+                  : resetPeriod === 'yearly'
+                    ? 'สรุปยอดเงินจากการรีเซ็ตย้อนหลัง - รายปี'
+                    : 'สรุปยอดเงินจากการรีเซ็ตย้อนหลัง - รายครั้ง'
+              }
             </h2>
             <p className="text-sm" style={{ marginTop: '4px', color: 'var(--gray-500)' }}>
               {viewMode === 'donations' 
@@ -281,30 +331,29 @@ export default function History() {
           </div>
         ) : (
           <div className="table-responsive">
-            <table className="styled-table">
+            <table className="styled-table" style={{ tableLayout: 'fixed', width: '100%' }}>
               <thead>
                 <tr>
-                  {resetPeriod === 'per_reset' && <th>วันและเวลาที่รีเซ็ต</th>}
-                  {resetPeriod === 'monthly' && <th>ประจำเดือน / ปี</th>}
-                  {resetPeriod === 'yearly' && <th>ประจำปี พ.ศ.</th>}
+                  {resetPeriod === 'per_reset' && <th style={{ width: '35%', textAlign: 'left' }}>วันและเวลาที่รีเซ็ต</th>}
+                  {resetPeriod === 'monthly' && <th style={{ width: '35%', textAlign: 'left' }}>ประจำเดือน / ปี</th>}
+                  {resetPeriod === 'yearly' && <th style={{ width: '35%', textAlign: 'left' }}>ประจำปี พ.ศ.</th>}
 
-                  <th style={{ textAlign: 'right' }}>ยอดเงินสรุปได้ (บาท)</th>
-                  <th>ผู้ทำรายการ</th>
-                  <th>หมายเหตุ</th>
-                  <th style={{ textAlign: 'center' }}>เอกสารยื่นภาษี / ใบเสร็จ</th>
+                  <th style={{ width: '23%', textAlign: 'right' }}>ยอดเงินสรุปได้ (บาท)</th>
+                  <th style={{ width: '20%', textAlign: 'center' }}>ผู้ทำรายการ</th>
+                  <th style={{ width: '22%', textAlign: 'center' }}>เอกสารยื่นภาษี / ใบเสร็จ</th>
                 </tr>
               </thead>
               <tbody>
                 {loadingResets ? (
                   <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', padding: '3rem', color: 'var(--gray-500)' }}>
+                    <td colSpan="4" style={{ textAlign: 'center', padding: '3rem', color: 'var(--gray-500)' }}>
                       <i className="fa-solid fa-spinner fa-spin fa-lg" style={{ marginRight: '8px' }}></i>
                       กำลังโหลดประวัติสรุปการรีเซ็ต...
                     </td>
                   </tr>
                 ) : resetHistory.length === 0 ? (
                   <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', padding: '4rem' }}>
+                    <td colSpan="4" style={{ textAlign: 'center', padding: '4rem' }}>
                       <div className="empty-state">
                         <RotateCcw className="empty-state-icon" style={{ opacity: 0.4 }} size={48} />
                         <p style={{ fontWeight: 600 }}>ยังไม่มีประวัติสรุปการรีเซ็ตยอดเงินในระบบ</p>
@@ -314,22 +363,19 @@ export default function History() {
                 ) : resetPeriod === 'per_reset' ? (
                   resetHistory.map((item) => (
                     <tr key={item.id}>
-                      <td style={{ display: 'flex', alignItems: 'center', gap: '8px', borderBottom: 'none' }}>
-                        <Calendar size={15} style={{ color: 'var(--primary)' }} />
-                        <span style={{ fontWeight: 600 }}>{formatDate(item.timestamp)}</span>
+                      <td style={{ textAlign: 'left' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                          <Calendar size={15} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+                          <span style={{ fontWeight: 600 }}>{formatDate(item.timestamp)}</span>
+                        </div>
                       </td>
                       <td className="amount-cell" style={{ textAlign: 'right', fontWeight: 700, color: '#059669', fontSize: '1.05rem' }}>
                         ฿{formatCurrency(item.amount)}
                       </td>
-                      <td>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          <UserCheck size={14} className="text-indigo" />
+                      <td style={{ textAlign: 'center' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--gray-700)' }}>
+                          <UserCheck size={15} className="text-indigo" />
                           {item.resetBy}
-                        </span>
-                      </td>
-                      <td style={{ color: 'var(--gray-500)', fontSize: '0.9rem' }}>
-                        <span className="badge" style={{ backgroundColor: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary)', padding: '4px 8px', borderRadius: '4px' }}>
-                          {item.note}
                         </span>
                       </td>
                       <td style={{ textAlign: 'center' }}>
@@ -348,22 +394,19 @@ export default function History() {
                 ) : resetPeriod === 'monthly' ? (
                   monthlyResets.map((mItem) => (
                     <tr key={mItem.periodKey}>
-                      <td style={{ display: 'flex', alignItems: 'center', gap: '8px', borderBottom: 'none' }}>
-                        <CalendarDays size={16} className="text-indigo" />
-                        <span style={{ fontWeight: 700, color: 'var(--dark)' }}>{mItem.periodLabel}</span>
+                      <td style={{ textAlign: 'left' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                          <CalendarDays size={16} className="text-indigo" style={{ flexShrink: 0 }} />
+                          <span style={{ fontWeight: 700, color: 'var(--dark)' }}>{mItem.periodLabel}</span>
+                        </div>
                       </td>
                       <td className="amount-cell" style={{ textAlign: 'right', fontWeight: 800, color: '#059669', fontSize: '1.1rem' }}>
                         ฿{formatCurrency(mItem.amount)}
                       </td>
-                      <td>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          <UserCheck size={14} className="text-indigo" />
+                      <td style={{ textAlign: 'center' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--gray-700)' }}>
+                          <UserCheck size={15} className="text-indigo" />
                           {mItem.resetBy}
-                        </span>
-                      </td>
-                      <td style={{ color: 'var(--gray-500)', fontSize: '0.9rem' }}>
-                        <span className="badge" style={{ backgroundColor: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary)', padding: '4px 8px', borderRadius: '4px' }}>
-                          สรุปยอดรวมประจำเดือน
                         </span>
                       </td>
                       <td style={{ textAlign: 'center' }}>
@@ -382,22 +425,19 @@ export default function History() {
                 ) : (
                   yearlyResets.map((yItem) => (
                     <tr key={yItem.periodKey}>
-                      <td style={{ display: 'flex', alignItems: 'center', gap: '8px', borderBottom: 'none' }}>
-                        <Calendar size={16} className="text-indigo" />
-                        <span style={{ fontWeight: 700, color: 'var(--dark)' }}>{yItem.periodLabel}</span>
+                      <td style={{ textAlign: 'left' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                          <Calendar size={16} className="text-indigo" style={{ flexShrink: 0 }} />
+                          <span style={{ fontWeight: 700, color: 'var(--dark)' }}>{yItem.periodLabel}</span>
+                        </div>
                       </td>
                       <td className="amount-cell" style={{ textAlign: 'right', fontWeight: 800, color: '#059669', fontSize: '1.1rem' }}>
                         ฿{formatCurrency(yItem.amount)}
                       </td>
-                      <td>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          <UserCheck size={14} className="text-indigo" />
+                      <td style={{ textAlign: 'center' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--gray-700)' }}>
+                          <UserCheck size={15} className="text-indigo" />
                           {yItem.resetBy}
-                        </span>
-                      </td>
-                      <td style={{ color: 'var(--gray-500)', fontSize: '0.9rem' }}>
-                        <span className="badge" style={{ backgroundColor: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary)', padding: '4px 8px', borderRadius: '4px' }}>
-                          สรุปยอดรวมประจำปี
                         </span>
                       </td>
                       <td style={{ textAlign: 'center' }}>
@@ -429,5 +469,3 @@ export default function History() {
     </section>
   );
 }
-
-

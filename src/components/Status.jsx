@@ -1,35 +1,61 @@
 import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, collection, query, orderBy, limit } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Wifi, Coins, AlertOctagon, CheckCircle2, ShieldAlert, Calendar } from 'lucide-react';
+import { Wifi, Coins, AlertOctagon, CheckCircle2, ShieldAlert, Calendar, WifiOff, Clock } from 'lucide-react';
 
 export default function Status() {
   const [sensors, setSensors] = useState({
-    wifi: 'online',
-    coin: 'online',
-    vib: 'online'
+    wifi: 'unknown',
+    coin: 'unknown',
+    vib: 'unknown'
   });
+  const [lastSeen, setLastSeen] = useState(null);
+  const [isBoxOnline, setIsBoxOnline] = useState(false);
 
   const [dailyChecks, setDailyChecks] = useState([]);
   const [dailyLoading, setDailyLoading] = useState(true);
 
+  // Subscribe to HardwareHeartbeat (สถานะเซ็นเซอร์จริงจาก Arduino)
   useEffect(() => {
-    const docRef = doc(db, 'Donation_Box', 'box1');
+    const docRef = doc(db, 'HardwareHeartbeat', 'box1');
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setSensors({
-          wifi: data.wifi || 'online',
-          coin: data.coin || 'online',
-          vib: data.vib || 'online'
+          wifi: data.wifi || 'offline',
+          coin: data.coin || 'offline',
+          vib: data.vib || 'offline'
         });
+
+        // เช็คว่าตู้ออนไลน์หรือไม่ (lastSeen ไม่เกิน 10 นาที)
+        if (data.lastSeen) {
+          const lastSeenDate = data.lastSeen.toDate();
+          setLastSeen(lastSeenDate);
+          const diffMs = Date.now() - lastSeenDate.getTime();
+          setIsBoxOnline(diffMs < 10 * 60 * 1000); // 10 นาที
+        }
+      } else {
+        // ไม่เคยมี heartbeat เลย
+        setIsBoxOnline(false);
+        setSensors({ wifi: 'offline', coin: 'offline', vib: 'offline' });
       }
     }, (error) => {
-      console.error('Error fetching sensors data:', error);
+      console.error('Error fetching heartbeat data:', error);
     });
 
     return () => unsubscribe();
   }, []);
+
+  // อัปเดตสถานะ online/offline ทุก 1 นาที
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (lastSeen) {
+        const diffMs = Date.now() - lastSeen.getTime();
+        setIsBoxOnline(diffMs < 10 * 60 * 1000);
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [lastSeen]);
 
   useEffect(() => {
     const q = query(collection(db, 'DailyHardwareCheck'), orderBy('checkTime', 'desc'), limit(7));
@@ -41,7 +67,8 @@ export default function Status() {
           id: docSnap.id,
           boxId: data.boxId || 'N/A',
           statusSummary: data.statusSummary || 'UNKNOWN',
-          checkTime: data.checkTime ? data.checkTime.toDate() : new Date()
+          checkTime: data.checkTime ? data.checkTime.toDate() : new Date(),
+          failedSystems: data.failedSystems || []
         });
       });
       setDailyChecks(list);
@@ -60,9 +87,9 @@ export default function Status() {
       title: 'การเชื่อมต่ออินเทอร์เน็ต',
       subtitle: 'WiFi / Firebase',
       icon: <Wifi />,
-      isOk: sensors.wifi === 'online',
+      isOk: sensors.wifi === 'online' && isBoxOnline,
       textOk: 'ปกติ',
-      textBad: 'ขาดการเชื่อมต่อ',
+      textBad: !isBoxOnline ? 'ตู้ไม่ตอบสนอง' : 'ขาดการเชื่อมต่อ',
       iconOkColor: 'bg-emerald-100 text-emerald-600',
       iconBadColor: 'bg-rose-100 text-rose-600',
       tagOk: 'success',
@@ -73,9 +100,9 @@ export default function Status() {
       title: 'เซ็นเซอร์นับเหรียญ/ธนบัตร',
       subtitle: 'Coin / Bill Acceptor',
       icon: <Coins />,
-      isOk: sensors.coin === 'online',
+      isOk: sensors.coin === 'online' && isBoxOnline,
       textOk: 'ปกติ',
-      textBad: 'ขัดข้อง / อุปกรณ์ขัดข้อง',
+      textBad: !isBoxOnline ? 'ไม่ทราบสถานะ' : 'ขัดข้อง / อุปกรณ์ขัดข้อง',
       iconOkColor: 'bg-emerald-100 text-emerald-600',
       iconBadColor: 'bg-rose-100 text-rose-600',
       tagOk: 'success',
@@ -84,11 +111,11 @@ export default function Status() {
     {
       id: 'vib',
       title: 'เซ็นเซอร์สั่นสะเทือน',
-      subtitle: 'MPU6050 Vibration',
+      subtitle: 'Vibration Sensor',
       icon: <AlertOctagon />,
-      isOk: sensors.vib === 'online',
+      isOk: sensors.vib === 'online' && isBoxOnline,
       textOk: 'ปกติ',
-      textBad: 'พบแรงสั่นสะเทือนผิดปกติ',
+      textBad: !isBoxOnline ? 'ไม่ทราบสถานะ' : 'พบแรงสั่นสะเทือนผิดปกติ',
       iconOkColor: 'bg-emerald-100 text-emerald-600',
       iconBadColor: 'bg-rose-100 text-rose-600',
       tagOk: 'success',
@@ -98,6 +125,39 @@ export default function Status() {
 
   return (
     <section className="page-section">
+      {/* Connection Status Banner */}
+      <div className="card glass-panel" style={{
+        padding: '1.25rem 2rem',
+        marginBottom: '1.5rem',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        backgroundColor: isBoxOnline ? 'rgba(16, 185, 129, 0.08)' : 'rgba(244, 63, 94, 0.08)',
+        border: isBoxOnline ? '1px solid rgba(16, 185, 129, 0.2)' : '1px solid rgba(244, 63, 94, 0.2)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {isBoxOnline ? (
+            <Wifi size={22} style={{ color: '#059669' }} />
+          ) : (
+            <WifiOff size={22} style={{ color: '#E11D48' }} />
+          )}
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1rem', color: isBoxOnline ? '#059669' : '#E11D48' }}>
+              {isBoxOnline ? '🟢 ตู้บริจาคออนไลน์' : '🔴 ตู้บริจาคออฟไลน์'}
+            </h3>
+            <p style={{ margin: '2px 0 0 0', fontSize: '0.8rem', color: 'var(--gray-500)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Clock size={12} />
+              {lastSeen 
+                ? `อัปเดตล่าสุด: ${new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'medium' }).format(lastSeen)}`
+                : 'ยังไม่เคยได้รับสัญญาณจากตู้'}
+            </p>
+          </div>
+        </div>
+        <span className={`sensor-badge ${isBoxOnline ? 'success' : 'danger'}`} style={{ fontSize: '0.9rem', padding: '6px 14px' }}>
+          {isBoxOnline ? 'ONLINE' : 'OFFLINE'}
+        </span>
+      </div>
+
       <div className="card glass-panel" style={{ padding: '2rem', marginBottom: '2rem' }}>
         <div className="card-header" style={{ marginBottom: '2rem' }}>
           <h2>สถานะเซ็นเซอร์ตู้บริจาค</h2>
@@ -135,83 +195,71 @@ export default function Status() {
         </div>
       </div>
 
-      {/* Daily Hardware Check Section */}
+      {/* Daily Hardware Check Section - History Table */}
       <div className="card glass-panel" style={{ padding: '2rem' }}>
-        <div className="card-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2>ผลการตรวจสุขภาพระบบรายวัน (19:00 น.)</h2>
+        <div className="card-header" style={{ marginBottom: '1.5rem' }}>
+          <h2>ผลการตรวจสุขภาพระบบรายวัน</h2>
         </div>
 
         {dailyLoading ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--gray-500)' }}>
-            <i className="fa-solid fa-spinner fa-spin fa-lg" style={{ marginRight: '8px' }}></i>
-            กำลังโหลดข้อมูลการตรวจสอบรายวัน...
+            กำลังโหลดข้อมูล...
           </div>
         ) : dailyChecks.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--gray-500)' }}>
-            <p>ไม่พบประวัติการตรวจสอบระบบรายวัน</p>
+            <p>ยังไม่มีประวัติการตรวจสอบระบบ (ระบบจะเริ่มบันทึกอัตโนมัติทุกวัน 19:30 น.)</p>
           </div>
         ) : (
-          <div>
-            {/* Latest daily check card */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '1.25rem',
-              borderRadius: '8px',
-              backgroundColor: dailyChecks[0].statusSummary === 'SUCCESS' ? 'rgba(16, 185, 129, 0.08)' : 'rgba(244, 63, 94, 0.08)',
-              border: dailyChecks[0].statusSummary === 'SUCCESS' ? '1px solid rgba(16, 185, 129, 0.2)' : '1px solid rgba(244, 63, 94, 0.2)',
-              marginBottom: '2rem'
-            }}>
-              <div>
-                <h3 style={{ margin: 0, color: dailyChecks[0].statusSummary === 'SUCCESS' ? '#059669' : '#E11D48' }}>
-                  สถานะการตรวจล่าสุด: {dailyChecks[0].statusSummary === 'SUCCESS' ? 'ปกติทั้งหมด (SUCCESS)' : 'พบข้อผิดพลาด/เซ็นเซอร์ขัดข้อง (WARNING)'}
-                </h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: '0.875rem', color: 'var(--gray-500)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <Calendar size={14} />
-                  ตรวจสอบล่าสุดเมื่อ: {new Intl.DateTimeFormat('th-TH', { dateStyle: 'long', timeStyle: 'short' }).format(dailyChecks[0].checkTime)}
-                </p>
-              </div>
-              <span className={`sensor-badge ${dailyChecks[0].statusSummary === 'SUCCESS' ? 'success' : 'danger'}`} style={{ fontSize: '1rem', padding: '8px 16px', borderRadius: '6px' }}>
-                {dailyChecks[0].statusSummary === 'SUCCESS' ? 'SUCCESS' : 'WARNING'}
-              </span>
-            </div>
-
-            {/* History Table */}
-            <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>ประวัติการตรวจสอบย้อนหลัง 7 วัน</h3>
-            <div className="table-responsive">
-              <table className="styled-table">
-                <thead>
-                  <tr>
-                    <th>วันที่และเวลาตรวจสอบ</th>
-                    <th>รหัสตู้</th>
-                    <th>ผลลัพธ์</th>
+          <div className="table-responsive">
+            <table className="styled-table">
+              <thead>
+                <tr>
+                  <th>วันที่ตรวจ</th>
+                  <th>สถานะตู้</th>
+                  <th>ระบบที่ขัดข้อง</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dailyChecks.map((check) => (
+                  <tr key={check.id}>
+                    <td style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Calendar size={14} style={{ color: 'var(--gray-400)', flexShrink: 0 }} />
+                      {new Intl.DateTimeFormat('th-TH', { dateStyle: 'long', timeStyle: 'short' }).format(check.checkTime)}
+                    </td>
+                    <td>
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '4px 12px',
+                        borderRadius: '6px',
+                        fontSize: '0.85rem',
+                        fontWeight: 600,
+                        backgroundColor: check.statusSummary === 'SUCCESS' ? 'rgba(16, 185, 129, 0.12)' : check.statusSummary === 'OFFLINE' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(244, 63, 94, 0.12)',
+                        color: check.statusSummary === 'SUCCESS' ? '#059669' : check.statusSummary === 'OFFLINE' ? '#D97706' : '#E11D48'
+                      }}>
+                        {check.statusSummary === 'SUCCESS' ? (
+                          <><CheckCircle2 size={14} /> พร้อมใช้งาน</>
+                        ) : check.statusSummary === 'OFFLINE' ? (
+                          <><ShieldAlert size={14} /> ตู้ไม่ตอบสนอง</>
+                        ) : (
+                          <><ShieldAlert size={14} /> มีอุปกรณ์ขัดข้อง</>
+                        )}
+                      </span>
+                    </td>
+                    <td style={{ color: 'var(--gray-600)' }}>
+                      {check.statusSummary === 'SUCCESS' ? (
+                        <span style={{ color: 'var(--gray-400)' }}>-</span>
+                      ) : check.failedSystems && check.failedSystems.length > 0 ? (
+                        check.failedSystems.join(', ')
+                      ) : (
+                        <span style={{ color: 'var(--gray-400)' }}>ไม่มีข้อมูลเซ็นเซอร์</span>
+                      )}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {dailyChecks.map((check) => (
-                    <tr key={check.id}>
-                      <td style={{ display: 'flex', alignItems: 'center', gap: '6px', borderBottom: 'none' }}>
-                        <Calendar size={14} className="text-gray-500" />
-                        {new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(check.checkTime)}
-                      </td>
-                      <td>{check.boxId}</td>
-                      <td>
-                        <span className={`badge ${check.statusSummary === 'SUCCESS' ? 'bg-emerald' : 'bg-rose'}`} style={{
-                          padding: '4px 8px',
-                          borderRadius: '4px',
-                          fontWeight: 600,
-                          backgroundColor: check.statusSummary === 'SUCCESS' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
-                          color: check.statusSummary === 'SUCCESS' ? '#059669' : '#E11D48'
-                        }}>
-                          {check.statusSummary === 'SUCCESS' ? 'ปกติ (SUCCESS)' : 'พบปัญหา (WARNING)'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

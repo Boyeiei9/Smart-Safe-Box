@@ -5,33 +5,62 @@ import { ShieldCheck, ShieldAlert } from 'lucide-react';
 
 export default function Header() {
   const [boxStatus, setBoxStatus] = useState({
-    statusDot: 'gray',
-    statusText: 'กำลังเชื่อมต่อ...',
-    errorCount: 0
+    statusDot: 'red',
+    statusText: 'สถานะ: ตู้ออฟไลน์',
+    errorCount: 1
   });
+  const [lastHeartbeatData, setLastHeartbeatData] = useState(null);
+
+  const evaluateStatus = (data) => {
+    if (!data || !data.lastSeen) {
+      setBoxStatus({
+        statusDot: 'red',
+        statusText: 'สถานะ: ตู้ออฟไลน์',
+        errorCount: 1
+      });
+      return;
+    }
+
+    const lastSeenDate = data.lastSeen.toDate ? data.lastSeen.toDate() : new Date(data.lastSeen);
+    const diffMs = Date.now() - lastSeenDate.getTime();
+    const isOnline = diffMs < 10 * 60 * 1000; // 10 นาที
+
+    if (!isOnline) {
+      setBoxStatus({
+        statusDot: 'red',
+        statusText: 'สถานะ: ตู้ออฟไลน์',
+        errorCount: 1
+      });
+      return;
+    }
+
+    let errorCount = 0;
+    const wifiStatus = data.wifi || 'offline';
+    const coinStatus = data.coin || 'offline';
+    const vibStatus = data.vib || 'offline';
+
+    if (wifiStatus !== 'online') errorCount++;
+    if (coinStatus !== 'online') errorCount++;
+    if (vibStatus !== 'online') errorCount++;
+
+    setBoxStatus({
+      statusDot: errorCount === 0 ? 'green' : 'red',
+      statusText: errorCount === 0 ? 'สถานะ: ปกติทั้งหมด' : `สถานะ: พบปัญหา ${errorCount} จุด`,
+      errorCount: errorCount
+    });
+  };
 
   useEffect(() => {
-    const docRef = doc(db, 'Donation_Box', 'box1');
+    const docRef = doc(db, 'HardwareHeartbeat', 'box1');
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      let errorCount = 0;
-      let data = {};
       if (docSnap.exists()) {
-        data = docSnap.data();
+        const data = docSnap.data();
+        setLastHeartbeatData(data);
+        evaluateStatus(data);
+      } else {
+        setLastHeartbeatData(null);
+        evaluateStatus(null);
       }
-
-      const wifiStatus = data.wifi || 'online';
-      const coinStatus = data.coin || 'online';
-      const vibStatus = data.vib || 'online';
-
-      if (wifiStatus !== 'online') errorCount++;
-      if (coinStatus !== 'online') errorCount++;
-      if (vibStatus !== 'online') errorCount++;
-
-      setBoxStatus({
-        statusDot: errorCount === 0 ? 'green' : 'red',
-        statusText: errorCount === 0 ? 'สถานะ: ปกติทั้งหมด' : `สถานะ: พบปัญหา ${errorCount} จุด`,
-        errorCount: errorCount
-      });
     }, (error) => {
       console.error('Error fetching box status:', error);
       setBoxStatus({
@@ -43,6 +72,16 @@ export default function Header() {
 
     return () => unsubscribe();
   }, []);
+
+  // เช็ค timeout ทุก 1 นาที
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (lastHeartbeatData) {
+        evaluateStatus(lastHeartbeatData);
+      }
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [lastHeartbeatData]);
 
   return (
     <header className="top-header">

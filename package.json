@@ -12,6 +12,8 @@
   "dependencies": {
     "canvas-confetti": "^1.9.4",
     "firebase": "^12.15.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
     "lucide-react": "^1.20.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

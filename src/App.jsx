@@ -128,21 +128,23 @@ function App() {
     return () => unsubscribe();
   }, [lastSeenAlertTime]);
 
-  // Subscribe to BoxStatus to check errors (for Status badge)
+  // Subscribe to HardwareHeartbeat to check errors (for Status badge)
   useEffect(() => {
-    const docRef = doc(db, 'Donation_Box', 'box1');
+    const docRef = doc(db, 'HardwareHeartbeat', 'box1');
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         let issues = 0;
-        const wifiStatus = data.wifi || 'online';
-        const coinStatus = data.coin || 'online';
-        const vibStatus = data.vib || 'online';
+        const wifiStatus = data.wifi || 'offline';
+        const coinStatus = data.coin || 'offline';
+        const vibStatus = data.vib || 'offline';
         
         if (wifiStatus !== 'online') issues++;
         if (coinStatus !== 'online') issues++;
         if (vibStatus !== 'online') issues++;
         setActiveIssues(issues);
+      } else {
+        setActiveIssues(1);
       }
     });
     return () => unsubscribe();
