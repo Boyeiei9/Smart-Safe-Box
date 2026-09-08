@@ -124,31 +124,35 @@ async function generateResetReportPDF({ type, items, totalAmount, periodLabel, d
     const pageItemChunks = [];
     const totalCount = sortedItems.length;
 
+    // Up to 18 items fit comfortably on a single A4 page with header, table, totals, signatures, and stamps.
     if (totalCount <= 18) {
         pageItemChunks.push(sortedItems);
-    } else if (totalCount <= 40) {
-        // 2 pages: balance rows so neither page looks empty
-        const lastPageCount = Math.min(18, Math.max(8, Math.floor(totalCount / 2)));
-        const page1Count = totalCount - lastPageCount;
+    } else if (totalCount <= 38) {
+        // 2 Pages (19 to 38 items):
+        // Page 1 has no totals or signatures, so fill it generously (18 to 20 items) so Page 1 looks full and dignified.
+        // Leave at least 5 items for Page 2 to accompany the summary totals and signature blocks.
+        const minLastPage = 5;
+        const page1Count = Math.min(20, Math.max(14, totalCount - minLastPage));
         pageItemChunks.push(sortedItems.slice(0, page1Count));
         pageItemChunks.push(sortedItems.slice(page1Count));
     } else {
         // 3+ pages
-        let p1Count = Math.min(22, Math.ceil(totalCount / Math.ceil(totalCount / 22)));
+        let p1Count = 20;
         pageItemChunks.push(sortedItems.slice(0, p1Count));
         let remaining = sortedItems.slice(p1Count);
         while (remaining.length > 0) {
-            if (remaining.length <= 18) {
+            if (remaining.length <= 16) {
                 pageItemChunks.push(remaining);
                 remaining = [];
-            } else if (remaining.length <= 36) {
-                const half = Math.ceil(remaining.length / 2);
-                pageItemChunks.push(remaining.slice(0, half));
-                pageItemChunks.push(remaining.slice(half));
+            } else if (remaining.length <= 34) {
+                const lastCount = Math.max(5, Math.min(14, remaining.length - 18));
+                const midCount = remaining.length - lastCount;
+                pageItemChunks.push(remaining.slice(0, midCount));
+                pageItemChunks.push(remaining.slice(midCount));
                 remaining = [];
             } else {
-                pageItemChunks.push(remaining.slice(0, 24));
-                remaining = remaining.slice(24);
+                pageItemChunks.push(remaining.slice(0, 20));
+                remaining = remaining.slice(20);
             }
         }
     }

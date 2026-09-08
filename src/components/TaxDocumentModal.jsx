@@ -9,19 +9,17 @@ export default function TaxDocumentModal({ isOpen, onClose, documentData }) {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
-  const [isFitMobile, setIsFitMobile] = useState(() => {
-    return typeof window !== 'undefined' && window.innerWidth < 860;
-  });
   const [mobileScale, setMobileScale] = useState(1);
   const [pageHeights, setPageHeights] = useState({});
   const printRef = useRef(null);
 
-  // Keep mobile preview scaling responsive to screen width
+  // Automatically keep document scaled to fit screen width on mobile/tablet without any manual toggling
   useEffect(() => {
     const updateMobileScale = () => {
-      if (typeof window !== 'undefined' && printRef.current) {
-        const availableW = printRef.current.clientWidth - 20;
-        if (isFitMobile && availableW < 820 && availableW > 0) {
+      if (typeof window !== 'undefined') {
+        const screenW = window.innerWidth;
+        const availableW = Math.min(screenW - 24, 820);
+        if (availableW < 820 && availableW > 0) {
           setMobileScale(availableW / 820);
         } else {
           setMobileScale(1);
@@ -29,9 +27,13 @@ export default function TaxDocumentModal({ isOpen, onClose, documentData }) {
       }
     };
     updateMobileScale();
+    const timer = setTimeout(updateMobileScale, 80);
     window.addEventListener('resize', updateMobileScale);
-    return () => window.removeEventListener('resize', updateMobileScale);
-  }, [isFitMobile, isOpen]);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', updateMobileScale);
+    };
+  }, [isOpen]);
 
   const isLineBrowser = typeof navigator !== 'undefined' && /Line\//i.test(navigator.userAgent);
 
@@ -185,30 +187,36 @@ export default function TaxDocumentModal({ isOpen, onClose, documentData }) {
   const chunkItemsForPages = (list) => {
     if (!list || list.length === 0) return [[]];
     const totalCount = list.length;
+    // Up to 18 items fit comfortably on a single A4 page with header, table, totals, signatures, and stamps.
     if (totalCount <= 18) {
       return [list];
     }
-    if (totalCount <= 40) {
-      const lastPageCount = Math.min(18, Math.max(8, Math.floor(totalCount / 2)));
-      const page1Count = totalCount - lastPageCount;
+    // 2 Pages (19 to 38 items):
+    // Page 1 has no totals or signatures, so fill it generously (18 to 20 items) so Page 1 looks full and dignified.
+    // Leave at least 5 items for Page 2 to accompany the summary totals and signature blocks.
+    if (totalCount <= 38) {
+      const minLastPage = 5;
+      const page1Count = Math.min(20, Math.max(14, totalCount - minLastPage));
       return [list.slice(0, page1Count), list.slice(page1Count)];
     }
+    // 3+ Pages
     const pages = [];
-    const p1Count = Math.min(22, Math.ceil(totalCount / Math.ceil(totalCount / 22)));
+    const p1Count = 20;
     pages.push(list.slice(0, p1Count));
     let remaining = list.slice(p1Count);
     while (remaining.length > 0) {
-      if (remaining.length <= 18) {
+      if (remaining.length <= 16) {
         pages.push(remaining);
         remaining = [];
-      } else if (remaining.length <= 36) {
-        const half = Math.ceil(remaining.length / 2);
-        pages.push(remaining.slice(0, half));
-        pages.push(remaining.slice(half));
+      } else if (remaining.length <= 34) {
+        const lastCount = Math.max(5, Math.min(14, remaining.length - 18));
+        const midCount = remaining.length - lastCount;
+        pages.push(remaining.slice(0, midCount));
+        pages.push(remaining.slice(midCount));
         remaining = [];
       } else {
-        pages.push(remaining.slice(0, 24));
-        remaining = remaining.slice(24);
+        pages.push(remaining.slice(0, 20));
+        remaining = remaining.slice(20);
       }
     }
     return pages;
@@ -226,29 +234,20 @@ export default function TaxDocumentModal({ isOpen, onClose, documentData }) {
         <div className="modal-action-bar no-print">
           <div className="action-bar-title">
             <FileCheck size={20} className="text-indigo" />
-            <span>ตัวอย่างเอกสารการเงิน {totalPages > 1 && `(${totalPages} แผ่น)`}</span>    
+            <span>ตัวอย่างเอกสารการเงิน</span>    
           </div>
           <div className="action-bar-right">
             <div className="action-bar-buttons">
               <button type="button" className="btn btn-primary btn-print" onClick={handlePrint}>
-                <Printer size={16} /> พิมพ์เอกสาร {totalPages > 1 && `(${totalPages} แผ่น)`}
+                <Printer size={16} /> พิมพ์เอกสาร
               </button>
               <button type="button" className="btn btn-primary btn-download" onClick={handleDownloadPdf} disabled={isGeneratingPdf}
                 style={{ backgroundColor: '#059669' }}>
-                <Download size={16} /> {isGeneratingPdf ? 'กำลังสร้าง...' : `บันทึกเป็น PDF ${totalPages > 1 ? `(${totalPages} หน้า)` : ''}`}
+                <Download size={16} /> {isGeneratingPdf ? 'กำลังสร้าง...' : 'บันทึกเป็น PDF'}
               </button>
               <button type="button" className="btn btn-secondary btn-image" onClick={handleSaveImage} disabled={isGeneratingImage}
                 style={{ borderColor: '#6366F1', color: '#4F46E5', fontWeight: 600 }}>
                 <ImageIcon size={16} /> {isGeneratingImage ? 'กำลังแปลง...' : 'บันทึกเป็นรูปภาพ'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-scale-toggle"
-                onClick={() => setIsFitMobile(!isFitMobile)}
-                title={isFitMobile ? "ซูมดูขนาดจริง 100%" : "ย่อให้พอดีหน้าจอมือถือ"}
-                style={{ borderColor: '#8B5CF6', color: '#7C3AED', fontWeight: 600 }}
-              >
-                {isFitMobile ? '🔍 100%' : '📱 พอดีจอ'}
               </button>
             </div>
             <button type="button" className="btn-close-modal" onClick={onClose} title="ปิดหน้าต่าง" aria-label="ปิด">
@@ -373,7 +372,7 @@ export default function TaxDocumentModal({ isOpen, onClose, documentData }) {
             const isFirstPage = pageIdx === 0;
             const isLastPage = pageIdx === totalPages - 1;
             const pageStartIdx = pageChunks.slice(0, pageIdx).reduce((acc, c) => acc + c.length, 0);
-            const shouldScale = isFitMobile && mobileScale < 1;
+            const shouldScale = mobileScale < 1;
 
             return (
               <div
