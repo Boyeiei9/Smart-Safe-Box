@@ -124,34 +124,21 @@ async function generateResetReportPDF({ type, items, totalAmount, periodLabel, d
     const pageItemChunks = [];
     const totalCount = sortedItems.length;
 
-    // Up to 18 items fit comfortably on a single A4 page with header, table, totals, signatures, and stamps.
-    if (totalCount <= 18) {
+    // Standard rule: Strictly 20 items per page!
+    // If totalCount <= 20 -> fits on 1 complete page
+    // If > 20 -> Page 1 has exactly 20 items, and subsequent pages take the rest (up to 20 per page)
+    if (totalCount <= 20) {
         pageItemChunks.push(sortedItems);
-    } else if (totalCount <= 42) {
-        // 2 Pages: fill Page 1 generously (up to 24 items) so Page 1 looks completely full and dignified.
-        // Leave at least 3-4 items for Page 2 to accompany the summary totals and signature blocks.
-        const minLastPage = 3;
-        const page1Count = Math.min(24, Math.max(16, totalCount - minLastPage));
-        pageItemChunks.push(sortedItems.slice(0, page1Count));
-        pageItemChunks.push(sortedItems.slice(page1Count));
     } else {
-        // 3+ pages
-        let p1Count = 22;
-        pageItemChunks.push(sortedItems.slice(0, p1Count));
-        let remaining = sortedItems.slice(p1Count);
+        pageItemChunks.push(sortedItems.slice(0, 20));
+        let remaining = sortedItems.slice(20);
         while (remaining.length > 0) {
-            if (remaining.length <= 16) {
+            if (remaining.length <= 20) {
                 pageItemChunks.push(remaining);
                 remaining = [];
-            } else if (remaining.length <= 34) {
-                const lastCount = Math.max(4, Math.min(14, remaining.length - 18));
-                const midCount = remaining.length - lastCount;
-                pageItemChunks.push(remaining.slice(0, midCount));
-                pageItemChunks.push(remaining.slice(midCount));
-                remaining = [];
             } else {
-                pageItemChunks.push(remaining.slice(0, 22));
-                remaining = remaining.slice(22);
+                pageItemChunks.push(remaining.slice(0, 20));
+                remaining = remaining.slice(20);
             }
         }
     }
@@ -334,6 +321,15 @@ async function generateResetReportPDF({ type, items, totalAmount, periodLabel, d
             // Fill intermediate page completely down to the continuation notice (y ≈ 1550)
             const availableH = (H - 140) - y;
             rowH = Math.min(56, Math.max(42, Math.floor(availableH / pageItems.length)));
+        } else if (isFirstPage && isLastPage) {
+            // Exactly 1 page (up to 20 items): fits header, table, totals, baht box, and signatures
+            if (pageItems.length <= 10) {
+                rowH = 50;
+            } else if (pageItems.length <= 15) {
+                rowH = 46;
+            } else {
+                rowH = 43;
+            }
         } else {
             // Last page: row height based on count so totals and signatures fit comfortably
             if (pageItems.length <= 8) {

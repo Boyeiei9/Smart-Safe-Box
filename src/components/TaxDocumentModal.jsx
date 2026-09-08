@@ -182,40 +182,25 @@ export default function TaxDocumentModal({ isOpen, onClose, documentData }) {
   const docNo = documentData.docNo || `TAX-${Date.now().toString().slice(-6)}`;
   const issueDate = formatDateOnly(new Date());
 
-  // Helper: Chunk items into pages intelligently
-  // A single page can comfortably hold up to 18 items with full header + signatures + footer.
+  // Standard rule: Strictly 20 items per page!
+  // If totalCount <= 20 -> fits on 1 complete page
+  // If > 20 -> Page 1 has exactly 20 items, and subsequent pages take the rest (up to 20 per page)
   const chunkItemsForPages = (list) => {
     if (!list || list.length === 0) return [[]];
     const totalCount = list.length;
-    // Up to 18 items fit comfortably on a single A4 page with header, table, totals, signatures, and stamps.
-    if (totalCount <= 18) {
+    if (totalCount <= 20) {
       return [list];
     }
-    // 2 Pages: fill Page 1 generously (up to 24 items) so Page 1 looks completely full and dignified.
-    // Leave at least 3-4 items for Page 2 to accompany the summary totals and signature blocks.
-    if (totalCount <= 42) {
-      const minLastPage = 3;
-      const page1Count = Math.min(24, Math.max(16, totalCount - minLastPage));
-      return [list.slice(0, page1Count), list.slice(page1Count)];
-    }
-    // 3+ Pages
     const pages = [];
-    const p1Count = 22;
-    pages.push(list.slice(0, p1Count));
-    let remaining = list.slice(p1Count);
+    pages.push(list.slice(0, 20));
+    let remaining = list.slice(20);
     while (remaining.length > 0) {
-      if (remaining.length <= 16) {
+      if (remaining.length <= 20) {
         pages.push(remaining);
         remaining = [];
-      } else if (remaining.length <= 34) {
-        const lastCount = Math.max(4, Math.min(14, remaining.length - 18));
-        const midCount = remaining.length - lastCount;
-        pages.push(remaining.slice(0, midCount));
-        pages.push(remaining.slice(midCount));
-        remaining = [];
       } else {
-        pages.push(remaining.slice(0, 22));
-        remaining = remaining.slice(22);
+        pages.push(remaining.slice(0, 20));
+        remaining = remaining.slice(20);
       }
     }
     return pages;
