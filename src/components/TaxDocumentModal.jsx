@@ -191,17 +191,16 @@ export default function TaxDocumentModal({ isOpen, onClose, documentData }) {
     if (totalCount <= 18) {
       return [list];
     }
-    // 2 Pages (19 to 38 items):
-    // Page 1 has no totals or signatures, so fill it generously (18 to 20 items) so Page 1 looks full and dignified.
-    // Leave at least 5 items for Page 2 to accompany the summary totals and signature blocks.
-    if (totalCount <= 38) {
-      const minLastPage = 5;
-      const page1Count = Math.min(20, Math.max(14, totalCount - minLastPage));
+    // 2 Pages: fill Page 1 generously (up to 24 items) so Page 1 looks completely full and dignified.
+    // Leave at least 3-4 items for Page 2 to accompany the summary totals and signature blocks.
+    if (totalCount <= 42) {
+      const minLastPage = 3;
+      const page1Count = Math.min(24, Math.max(16, totalCount - minLastPage));
       return [list.slice(0, page1Count), list.slice(page1Count)];
     }
     // 3+ Pages
     const pages = [];
-    const p1Count = 20;
+    const p1Count = 22;
     pages.push(list.slice(0, p1Count));
     let remaining = list.slice(p1Count);
     while (remaining.length > 0) {
@@ -209,14 +208,14 @@ export default function TaxDocumentModal({ isOpen, onClose, documentData }) {
         pages.push(remaining);
         remaining = [];
       } else if (remaining.length <= 34) {
-        const lastCount = Math.max(5, Math.min(14, remaining.length - 18));
+        const lastCount = Math.max(4, Math.min(14, remaining.length - 18));
         const midCount = remaining.length - lastCount;
         pages.push(remaining.slice(0, midCount));
         pages.push(remaining.slice(midCount));
         remaining = [];
       } else {
-        pages.push(remaining.slice(0, 20));
-        remaining = remaining.slice(20);
+        pages.push(remaining.slice(0, 22));
+        remaining = remaining.slice(22);
       }
     }
     return pages;

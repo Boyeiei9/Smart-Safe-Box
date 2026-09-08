@@ -127,17 +127,16 @@ async function generateResetReportPDF({ type, items, totalAmount, periodLabel, d
     // Up to 18 items fit comfortably on a single A4 page with header, table, totals, signatures, and stamps.
     if (totalCount <= 18) {
         pageItemChunks.push(sortedItems);
-    } else if (totalCount <= 38) {
-        // 2 Pages (19 to 38 items):
-        // Page 1 has no totals or signatures, so fill it generously (18 to 20 items) so Page 1 looks full and dignified.
-        // Leave at least 5 items for Page 2 to accompany the summary totals and signature blocks.
-        const minLastPage = 5;
-        const page1Count = Math.min(20, Math.max(14, totalCount - minLastPage));
+    } else if (totalCount <= 42) {
+        // 2 Pages: fill Page 1 generously (up to 24 items) so Page 1 looks completely full and dignified.
+        // Leave at least 3-4 items for Page 2 to accompany the summary totals and signature blocks.
+        const minLastPage = 3;
+        const page1Count = Math.min(24, Math.max(16, totalCount - minLastPage));
         pageItemChunks.push(sortedItems.slice(0, page1Count));
         pageItemChunks.push(sortedItems.slice(page1Count));
     } else {
         // 3+ pages
-        let p1Count = 20;
+        let p1Count = 22;
         pageItemChunks.push(sortedItems.slice(0, p1Count));
         let remaining = sortedItems.slice(p1Count);
         while (remaining.length > 0) {
@@ -145,14 +144,14 @@ async function generateResetReportPDF({ type, items, totalAmount, periodLabel, d
                 pageItemChunks.push(remaining);
                 remaining = [];
             } else if (remaining.length <= 34) {
-                const lastCount = Math.max(5, Math.min(14, remaining.length - 18));
+                const lastCount = Math.max(4, Math.min(14, remaining.length - 18));
                 const midCount = remaining.length - lastCount;
                 pageItemChunks.push(remaining.slice(0, midCount));
                 pageItemChunks.push(remaining.slice(midCount));
                 remaining = [];
             } else {
-                pageItemChunks.push(remaining.slice(0, 20));
-                remaining = remaining.slice(20);
+                pageItemChunks.push(remaining.slice(0, 22));
+                remaining = remaining.slice(22);
             }
         }
     }
@@ -329,8 +328,23 @@ async function generateResetReportPDF({ type, items, totalAmount, periodLabel, d
 
         y += 40;
 
-        // Dynamic row height: if <= 10 items, slightly taller (44px), if 11-18 items (41px) for optimal fit
-        const rowH = pageItems.length > 12 ? 41 : 44;
+        // Dynamic row height to guarantee that pages are FULL and never have dead white space
+        let rowH;
+        if (!isLastPage) {
+            // Fill intermediate page completely down to the continuation notice (y ≈ 1550)
+            const availableH = (H - 140) - y;
+            rowH = Math.min(56, Math.max(42, Math.floor(availableH / pageItems.length)));
+        } else {
+            // Last page: row height based on count so totals and signatures fit comfortably
+            if (pageItems.length <= 8) {
+                rowH = 48;
+            } else if (pageItems.length <= 14) {
+                rowH = 44;
+            } else {
+                rowH = 40;
+            }
+        }
+
         pageItems.forEach((item, idx) => {
             const itemIdx = globalStartIndex + idx;
             ctx.fillStyle = itemIdx % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
@@ -341,29 +355,30 @@ async function generateResetReportPDF({ type, items, totalAmount, periodLabel, d
             ctx.strokeRect(tblX, y, tblW, rowH);
 
             const itemDate = item.timestamp ? (typeof item.timestamp.toDate === "function" ? item.timestamp.toDate() : new Date(item.timestamp)) : new Date();
+            const textMidY = y + rowH / 2;
 
             ctx.fillStyle = "#1E293B";
             ctx.font = "bold 15px SarabunBold";
             ctx.textAlign = "center";
-            ctx.fillText(String(itemIdx + 1), tblX + colW[0] / 2, y + rowH / 2 + 5);
+            ctx.fillText(String(itemIdx + 1), tblX + colW[0] / 2, textMidY + 5);
 
             ctx.font = "14px Sarabun";
-            ctx.fillText(formatDatePDF(itemDate), tblX + colW[0] + colW[1] / 2, y + rowH / 2 + 5);
+            ctx.fillText(formatDatePDF(itemDate), tblX + colW[0] + colW[1] / 2, textMidY + 5);
 
             ctx.textAlign = "left";
             ctx.font = "bold 14px SarabunBold";
-            ctx.fillText("เงินบริจาคสมทบทุน " + temple, tblX + colW[0] + colW[1] + 20, y + 17);
+            ctx.fillText("เงินบริจาคสมทบทุน " + temple, tblX + colW[0] + colW[1] + 20, textMidY - 5);
 
             ctx.fillStyle = "#64748B";
             ctx.font = "12px Sarabun";
             const noteText = item.note || "รอบการรีเซ็ตตู้บริจาคอัจฉริยะ (ผู้ดูแลระบบ)";
-            ctx.fillText(noteText, tblX + colW[0] + colW[1] + 20, y + 32);
+            ctx.fillText(noteText, tblX + colW[0] + colW[1] + 20, textMidY + 12);
 
             // Clean number display without redundant '฿' (header already specifies บาท)
             ctx.textAlign = "right";
             ctx.fillStyle = "#1E293B";
             ctx.font = "bold 16px SarabunBold";
-            ctx.fillText(formatCurrencyPDF(item.amount), tblX + tblW - 20, y + rowH / 2 + 5);
+            ctx.fillText(formatCurrencyPDF(item.amount), tblX + tblW - 20, textMidY + 5);
 
             y += rowH;
         });

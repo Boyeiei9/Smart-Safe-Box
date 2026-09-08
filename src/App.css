@@ -1596,6 +1596,10 @@ input:checked + .toggle-slider:before {
   vertical-align: middle;
 }
 
+.tax-document-page:not(:last-child) .tax-doc-table td {
+  padding: 0.62rem 0.75rem;
+}
+
 .tax-doc-table tbody tr:nth-child(even) {
   background-color: #F8FAFC;
 }
